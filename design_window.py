@@ -17,3 +17,4 @@ class DesignWindow(QWidget):
         layout.addWidget(button)
 
         self.setLayout(layout)
+    
