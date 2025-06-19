@@ -465,12 +465,11 @@ class ProcessWindow(QWidget):
                 atlas_flat = fnc_pro_atlas_masks.flatten()
                 atlased_data = np.zeros((fnc_rawdata_len, atl_len), dtype=np.float32)
                 # Extract ROI time series one frame at a time
-                for t in range(fnc_rawdata_len):
-                    frame = np.asanyarray(dataobj[..., t], dtype=np.float32)
-                    flat  = frame.flatten()
-                    for ii in range(1, atl_len + 1):
-                        mask = (atlas_flat == ii)
-                        atlased_data[t, ii - 1] = flat[mask].mean()
+                test_array = np.asanyarray(dataobj, dtype=np.float32)
+                flat_array = test_array.reshape(-1,test_array.shape[-1])
+                for ii in range(atl_len):
+                    print(ii)                    
+                    atlased_data[:, ii] = flat_array[atlas_flat==(ii+1),:].mean(axis=0)
 
             # --- B. If .mat time-series input ---
             else:
