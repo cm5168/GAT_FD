@@ -9,6 +9,7 @@ from scipy.signal import butter, filtfilt
 from PyQt6.QtWidgets import QWidget, QLabel,QComboBox, QFileDialog, QPushButton, QListWidget, QSpinBox, QProgressDialog, QApplication,QLineEdit, QFormLayout, QMessageBox
 from PyQt6.QtCore import QRegularExpression
 from PyQt6.QtGui import QIntValidator, QRegularExpressionValidator   
+from nilearn.input_data import NiftiLabelsMasker
 class ProcessWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -385,149 +386,147 @@ class ProcessWindow(QWidget):
 
     # Run process
     def gatp_run_process(self):
-        # Update settings
+        # ——— Update settings and parameters ———
         fnc_pro_filelength = len(self.settings['file_list'])
         self.parameters_update_setting()
-        # Load input file
+
+        # Load filter settings based on user selection
         filter_type = self.settings['filter_type']
         if filter_type == 0:
-            filter_setting1 = 0
-            filter_setting2 = 0
+            filter_setting1 = filter_setting2 = 0
         elif filter_type == 1:
             filter_setting1 = float(self.settings['filter_setting1'])
             filter_setting2 = float(self.settings['filter_setting2'])
+            # Validate bandpass: lower < upper
             if filter_setting1 >= filter_setting2:
                 QMessageBox.critical(self, "Error", "Please enter correct band pass parameters")
                 return
-        elif filter_type in [2, 3]:
+        elif filter_type in (2, 3):
             filter_setting1 = float(self.settings['filter_setting1'])
             filter_setting2 = 0
         elif filter_type == 4:
             filter_setting1 = int(self.settings['filter_setting1'])
             filter_setting2 = int(self.settings['filter_setting2'])
         else:
+            # Unexpected filter type
             print("filter type error")
             return
 
-        # Check input file format
-        if self.file_format_dropdown.currentIndex() == 0:  # If input is image
+        # Determine atlas and window size depending on file format
+        if self.file_format_dropdown.currentIndex() == 0:
             atlas_index = self.atlas_input.currentIndex()
             atlas_files = self.settings['atlas_list']
-            if atlas_index == 2 and len(atlas_files) > 0:
-                masks = [] #Custom
+            if atlas_index == 2 and atlas_files:
+                # Custom: merge multiple atlas masks into one integer-labeled mask
+                masks = []
                 for path in atlas_files:
-                    mask_img = nib.load(path)
-                    mask_data = (mask_img.get_fdata() > 0).astype(np.float64)
-                    masks.append(mask_data)
-                fnc_pro_atlas_masks = np.sum([m * (i + 1) for i, m in enumerate(masks)], axis=0)
-                atl_len = int(np.max(fnc_pro_atlas_masks))
-                # atlas_img = nib.load(self.settings['atlas_list'][0])
-            elif atlas_index == 0: #Brainetome 1.25mm
-                path = os.path.join(self.settings.get('path', ''), 'atlas', 'BN_atlas_1_25mm.nii')
-                fnc_pro_atlas_masks = nib.load(path).get_fdata()
-                atl_len = 246
+                    img = nib.load(path)
+                    masks.append((img.get_fdata() > 0).astype(np.int32))
+                fnc_pro_atlas_masks = np.sum([m * (i+1)
+                                            for i, m in enumerate(masks)], axis=0)
+                atlas_img = fnc_pro_atlas_masks  # use array directly
+            elif atlas_index == 0:
+                # Use default Brainetome atlas
                 atlas_img = os.path.join(self.settings.get('path', ''), 'atlas', 'BN_atlas_1_25mm.nii')
-            elif atlas_index == 1: #AAL2v1 2mm
-                path = os.path.join(self.settings.get('path', ''), 'atlas', 'AAL2v1_2mm.nii.txt')
-                fnc_pro_atlas_masks = nib.load(path).get_fdata()
-                atl_len = 94
+                fnc_pro_atlas_masks = nib.load(atlas_img).get_fdata().astype(np.int32)
+            elif atlas_index == 1:
+                # Use default AAL2 atlas
                 atlas_img = os.path.join(self.settings.get('path', ''), 'atlas', 'AAL2v1_2mm.nii.txt')
+                fnc_pro_atlas_masks = nib.load(atlas_img).get_fdata().astype(np.int32)
             else:
                 QMessageBox.critical(self, "Error", "Invalid atlas selection")
                 return
+            atl_len = int(fnc_pro_atlas_masks.max())
             fnc_window_size = self.settings['window_size']
-        elif self.file_format_dropdown.currentIndex() == 1:  # If input is matrix
+        else:
+            # Matrix input: atlas_list length defines number of regions
             atl_len = len(self.settings['atlas_list'])
             if atl_len < 1:
-                QMessageBox.critical(self, 'Error','Please load label')
+                QMessageBox.critical(self, 'Error', 'Please load label')
                 return
             fnc_window_size = self.settings['window_size']
-        # Select output folder
+
+        # Prompt for output folder
         fnc_out_path = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if not fnc_out_path:
             return
-        # Create process bar
+
+        # Initialize progress dialog
         progress_dialog = QProgressDialog("Processing...", None, 0, fnc_pro_filelength, self)
         progress_dialog.setWindowTitle("Processing")
         progress_dialog.show()
-        # Run program
+
         for i in range(fnc_pro_filelength):
             file_path = os.path.join(self.settings['file_path'][i], self.settings['file_list'][i])
-            if self.file_format_dropdown.currentIndex() == 0:
-                func_img = nib.load(file_path)
-                dataobj  = func_img.dataobj
-                fnc_rawdata_len = func_img.shape[3]
-                fnc_window_count = fnc_rawdata_len - fnc_window_size + 1
-                # Resample atlas to functional space ONCE per file
-                atlas_resampled = resample_to_img(atlas_img, func_img, interpolation='nearest')
-                fnc_pro_atlas_masks = atlas_resampled.get_fdata().astype(np.int32)
-                atl_len = int(fnc_pro_atlas_masks.max())
-                atlas_flat = fnc_pro_atlas_masks.flatten()
-                atlased_data = np.zeros((fnc_rawdata_len, atl_len), dtype=np.float32)
-                # Extract ROI time series one frame at a time
-                test_array = np.asanyarray(dataobj, dtype=np.float32)
-                flat_array = test_array.reshape(-1,test_array.shape[-1])
-                for ii in range(atl_len):
-                    print(ii)                    
-                    atlased_data[:, ii] = flat_array[atlas_flat==(ii+1),:].mean(axis=0)
 
-            # --- B. If .mat time-series input ---
+            if self.file_format_dropdown.currentIndex() == 0:
+                # Load NIfTI with memory mapping
+                func_img = nib.load(file_path, mmap=True)
+                fnc_raw_len = func_img.shape[3]
+                fnc_window_count = fnc_raw_len - fnc_window_size + 1
+
+                # ——— Nilearn‐based ROI extraction ———
+                masker = NiftiLabelsMasker(
+                    labels_img=atlas_img,
+                    standardize=False,
+                    memory='nilearn_cache', memory_level=1
+                )
+                # shape: (n_timepoints, n_regions)
+                atlased_data = masker.fit_transform(func_img)
             else:
+                # .mat input: load full matrix (time × regions)
                 mat = loadmat(file_path)
                 key = next(k for k in mat if not k.startswith('__'))
-                atlased_data = mat[key]
-                fnc_rawdata_len = atlased_data.shape[0]
-                fnc_window_count = fnc_rawdata_len - fnc_window_size + 1
+                atlased_data = mat[key].astype(np.float32)
+                fnc_raw_len, _ = atlased_data.shape
+                fnc_window_count = fnc_raw_len - fnc_window_size + 1
                 atl_len = atlased_data.shape[1]
 
-            progress_dialog.setValue(i + 1)
-            # Filter
+            progress_dialog.setValue(i+1)
+
+            # ——— Apply temporal filter if requested ———
             tr = self.settings['TR']
-            fs = 1 / tr
-            nyq = fs / 2
-            if filter_type == 0:
-            # None: do nothing
-                pass
-            elif filter_type == 1:  # Bandpass
-                low_hz  = 1 / filter_setting2    # lower cutoff in Hz
-                high_hz = 1 / filter_setting1    # upper cutoff in Hz
-                wp = [low_hz  / nyq, high_hz  / nyq]
-                b, a = butter(2, wp, btype='band')
+            fs = 1.0 / tr
+            nyq = fs / 2.0
+            if filter_type == 1:
+                # Bandpass filter
+                low = (1.0 / filter_setting2) / nyq
+                high = (1.0 / filter_setting1) / nyq
+                b, a = butter(2, [low, high], btype='band')
                 atlased_data = filtfilt(b, a, atlased_data, axis=0)
-            elif filter_type == 2:  # Highpass
-                # Highpass
-                cutoff_hz = 1 / filter_setting1
-                wp = cutoff_hz / nyq
-                b, a = butter(2, wp, btype='high')
+            elif filter_type == 2:
+                # Highpass filter
+                cutoff = (1.0 / filter_setting1) / nyq
+                b, a = butter(2, cutoff, btype='high')
                 atlased_data = filtfilt(b, a, atlased_data, axis=0)
-            elif filter_type == 3:  # Lowpass
-                cutoff_hz = 1 / filter_setting1
-                wp = cutoff_hz / nyq
-                b, a = butter(2, wp, btype='low')
+            elif filter_type == 3:
+                # Lowpass filter
+                cutoff = (1.0 / filter_setting1) / nyq
+                b, a = butter(2, cutoff, btype='low')
                 atlased_data = filtfilt(b, a, atlased_data, axis=0)
-            elif filter_type == 5:  # Wavelet
+            elif filter_type == 5:
+                # Wavelet denoising per column
                 for col in range(atlased_data.shape[1]):
                     coeffs = pywt.wavedec(atlased_data[:, col], 'db1', level=filter_setting1)
-                    # zero out all but the desired level
                     for idx in range(len(coeffs)):
-                        if idx + 1 != filter_setting2:
+                        if idx+1 != filter_setting2:
                             coeffs[idx] = np.zeros_like(coeffs[idx])
-                    atlased_data[:, col] = pywt.waverec(coeffs, 'db1')[:atlased_data.shape[0]]
-            else:
-                raise ValueError(f"Unknown filter type: {filter_type}")
-            # Sliding Window
-            corr_data = np.zeros((fnc_window_count, atl_len, atl_len))
-            for idx_window in range(fnc_window_count):
-                window_data = atlased_data[idx_window:idx_window + fnc_window_size, :]
-                if self.settings['kernel'] == 2:
-                    temp_gi = np.arange(1, fnc_window_size + 1)
-                    temp_gm = fnc_window_size // 2 + 1
-                    temp_gau = np.exp(-((temp_gi - temp_gm) ** 2) / (2 * (self.settings['kernel_setting'] ** 2)))
-                    window_data = window_data * temp_gau[:, np.newaxis]
-                temp_corr = np.corrcoef(window_data, rowvar=False)
-                temp_corr[np.isnan(temp_corr)] = 0
-                corr_data[idx_window, :, :] = temp_corr
+                    atlased_data[:, col] = pywt.waverec(coeffs, 'db1')[:fnc_raw_len]
 
+            # ——— Sliding-window correlation ———
+            corr_data = np.zeros((fnc_window_count, atl_len, atl_len), dtype=np.float32)
+            for w in range(fnc_window_count):
+                window = atlased_data[w:w+fnc_window_size, :]
+                if self.settings['kernel'] == 2:
+                    idx = np.arange(1, fnc_window_size+1)
+                    center = fnc_window_size/2 + 1
+                    gauss = np.exp(-((idx-center)**2)/(2*(self.settings['kernel_setting']**2)))
+                    window = window * gauss[:, None]
+                tmp = np.corrcoef(window, rowvar=False)
+                tmp[np.isnan(tmp)] = 0
+                corr_data[w] = tmp
+
+            # Save results to .mat
             subj_data = {
                 'd_atlas': atlased_data,
                 'd_corr': corr_data,
@@ -537,16 +536,11 @@ class ProcessWindow(QWidget):
                 'd_kernel': self.settings['kernel'],
                 'd_atlas_list': self.settings['atlas_list']
             }
+            fname = os.path.splitext(self.settings['file_list'][i])[0]
+            savemat(os.path.join(fnc_out_path, f"{fname}.mat"), {'subj_data': subj_data})
+            progress_dialog.setLabelText(f"{i+1}/{fnc_pro_filelength}: Done")
 
-            filename = self.settings['file_list'][i]
-            if filename.endswith('.nii'):
-                filename = filename[:-4]
-            elif filename.endswith('.nii.gz'):
-                filename = filename[:-7]
-            out_path = os.path.join(fnc_out_path, filename + '.mat')
-            savemat(out_path, {'subj_data': subj_data})
-
-            progress_dialog.setLabelText(f"{i + 1}/{fnc_pro_filelength}: Done")
-
+        # Close dialog and notify completion
         progress_dialog.close()
         QMessageBox.information(self, "Finished", "Finished")
+
