@@ -10,7 +10,7 @@ from matplotlib.figure import Figure
 import numpy as np
 import scipy.io
 
-class ViewWindow(QMainWindow    ):
+class ViewWindow(QWidget    ):
     def __init__(self):
         super().__init__()
         self.createComponents()
@@ -29,8 +29,9 @@ class ViewWindow(QMainWindow    ):
         self.gatv_setting['frame_limit'] = [1, len(d_corr)]
         self.frame_slider.setMinimum(0)
         self.frame_slider.setMaximum(len(d_corr))
-        # print("Loaded file:", file_path.split("/")[-1])
-        # print("Total frames:", d_corr)
+        print("Loaded file:", file_path.split("/")[-1])
+        print("Frames:", d_corr)
+        print("Total frames:", len(d_corr))
         self.gatv_update_network()
         
     def gatv_update_network(self):
@@ -55,8 +56,8 @@ class ViewWindow(QMainWindow    ):
         self.setGeometry(100, 100, 832, 810)
 
         self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        layout = QGridLayout(self.central_widget)
+        self.setLayout(QGridLayout())  # Directly set layout on the QWidget
+        layout = self.layout()
 
         self.gatv_setting = {}
         self.gatv_data = {}

@@ -6,9 +6,8 @@ import pywt
 from scipy.io import savemat, loadmat
 from nilearn.image import resample_to_img
 from scipy.signal import butter, filtfilt
-from PyQt6.QtWidgets import QWidget, QLabel,QComboBox, QFileDialog, QPushButton, QListWidget, QSpinBox, QProgressDialog, QApplication,QLineEdit, QFormLayout, QMessageBox
-from PyQt6.QtCore import QRegularExpression
-from PyQt6.QtGui import QIntValidator, QRegularExpressionValidator   
+from PyQt6.QtWidgets import QWidget, QLabel,QComboBox, QFileDialog, QPushButton, QListWidget, QProgressDialog,QLineEdit, QFormLayout, QMessageBox
+from PyQt6.QtGui import QIntValidator 
 from nilearn.input_data import NiftiLabelsMasker
 class ProcessWindow(QWidget):
     def __init__(self):
