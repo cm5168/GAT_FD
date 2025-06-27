@@ -39,16 +39,13 @@ class ViewWindow(QWidget    ):
             self.gatv_setting['frame_cur'] = int(self.frame_slider.value())
             self.frame_slider_cursor.setText(str(self.gatv_setting['frame_cur']))
             self.network_ax.clear()
-
             data = self.gatv_setting['networks']
             if data.ndim == 3:
                 matrix = data[self.gatv_setting['frame_cur'] - 1, :, :]
             else:
                 matrix = data  # just one matrix, no frame dimension
-
             self.network_ax.imshow(matrix, cmap='jet')
             self.network_canvas.draw()
-
 
     def createComponents(self):
         # Create GATFD_process_UIFigure 

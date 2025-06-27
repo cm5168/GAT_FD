@@ -10,6 +10,10 @@ from matplotlib.figure import Figure
 from PyQt6.QtWidgets import QFileDialog
 from scipy.io import savemat
 import os
+import numpy as np
+from nilearn.glm.first_level import spm_hrf
+from PyQt6.QtWidgets import QMessageBox
+
 class DesignWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -18,6 +22,7 @@ class DesignWindow(QWidget):
         self.parameters_update_field()
     #  Button pushed function: DefaulSettingButton
     def parameters_default(self):
+        self.gatd_plot = type('', (), {})()
         self.settings = {
         'tr': 1,
         'window_size': 20,
@@ -60,9 +65,21 @@ class DesignWindow(QWidget):
 
     def parameters_update_setting(self):
         # Sliding Window Setting
-        self.settings['tr'] = int(self.tr_value.text())
-        self.settings['window_size'] = int(self.window_size.text())
-        self.settings['step_size'] = int(self.step_size.text())
+        try:
+            self.settings['tr'] = int(self.tr_value.text())
+        except ValueError:
+            self.settings['tr'] = 1
+        # self.settings['window_size'] = int(self.window_size.text())
+        try:
+            self.settings['window_size'] = int(self.window_size.text())
+        except ValueError:
+            self.settings['window_size'] = 1
+            
+        try:
+            self.settings['step_size'] = int(self.step_size.text())
+        except ValueError:
+            self.settings['step_size'] = 1
+        # self.settings['step_size'] = int(self.step_size.text())
 
         # Design
         self.settings['design_condition_list'] = self.condition_sequence.text()
@@ -123,8 +140,185 @@ class DesignWindow(QWidget):
             self.total_steps.setText("0")
 
     def gatd_update_design(self):
-            self.parameters_update_setting()
-            # print("Setting:", self.settings)
+        self.parameters_update_setting()
+
+        try:
+            dt = 0.1  # Time resolution in seconds
+            hrf_at_fine_resolution = spm_hrf(tr=dt)
+
+            # Downsample HRF to match TR (e.g., TR = 1s)
+            n_trs = int(len(hrf_at_fine_resolution) * dt / self.settings['tr'])
+            sample_points = np.arange(0, n_trs) * self.settings['tr']
+            hrf_times = np.arange(len(hrf_at_fine_resolution)) * dt
+            dfnc_hrf = np.interp(sample_points, hrf_times, hrf_at_fine_resolution)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"HRF calculation failed: {e}")
+            return
+
+        # --- Parse design condition list ---
+        if not self.settings['design_condition_list'].strip():
+            QMessageBox.critical(self, "Error", "Please enter condition sequence")
+            return
+
+        try:
+            run_design_condition_list = list(map(float, self.settings['design_condition_list'].split()))
+        except:
+            QMessageBox.critical(self, "Error", "Please enter the condition sequence with only one space between numbers")
+            return
+
+        # --- Parse duration list ---
+        if not self.settings['design_duration_list'].strip():
+            QMessageBox.critical(self, "Error", "Please enter duration sequence")
+            return
+
+        try:
+            run_design_duration_list_in_s = list(map(float, self.settings['design_duration_list'].split()))
+        except:
+            QMessageBox.critical(self, "Error", "Please enter the duration sequence with only one space between numbers")
+            return
+
+        if len(run_design_condition_list) != len(run_design_duration_list_in_s):
+            QMessageBox.critical(self, "Error", "The condition sequence and duration sequence do not match")
+            return
+
+        # --- If manual stage method ---
+        if self.settings['stage_method'] == 2:
+            if not self.settings['stage_condition_list'].strip():
+                QMessageBox.critical(self, "Error", "Please enter condition sequence")
+                return
+            try:
+                run_stage_condition_list = list(map(float, self.settings['stage_condition_list'].split()))
+            except:
+                QMessageBox.critical(self, "Error", "Please enter the condition sequence with only one space between numbers")
+                return
+
+            if not self.settings['stage_duration_list'].strip():
+                QMessageBox.critical(self, "Error", "Please enter duration sequence")
+                return
+            try:
+                run_stage_duration_list = list(map(float, self.settings['stage_duration_list'].split()))
+            except:
+                QMessageBox.critical(self, "Error", "Please enter the duration sequence with only one space between numbers")
+                return
+
+            if len(run_stage_condition_list) != len(run_stage_duration_list):
+                QMessageBox.critical(self, "Error", "The condition sequence and duration sequence do not match")
+                return
+
+        # --- Build design matrix ---
+        dfnc_length = int(sum(run_design_duration_list_in_s) // self.settings['tr'])
+        temp_duration_list_s = np.cumsum(run_design_duration_list_in_s)
+        temp_duration_list = [int(round(val / self.settings['tr'])) for val in temp_duration_list_s[:-1]]
+        temp_duration_list.append(int(temp_duration_list_s[-1] // self.settings['tr']))
+        temp_duration_list[-1] = int(temp_duration_list_s[-1] // self.settings['tr'])
+        run_design_duration_list = [temp_duration_list[0]] + list(np.diff(temp_duration_list))
+
+        dfnc_design = np.zeros(dfnc_length)
+        duration_list_cs = np.cumsum(run_design_duration_list).astype(int)
+        dfnc_design = np.zeros(dfnc_length)
+        start = 0
+        for cond, dur in zip(run_design_condition_list, run_design_duration_list):
+            end = min(start + dur, dfnc_length)
+            dfnc_design[start:end] = cond
+            start = end
+        # duration_list_cs = np.clip(duration_list_cs, 0, dfnc_length)
+
+        self.settings['dfnc_design'] = dfnc_design
+
+        # --- Convolve with HRF ---
+        dfnc_response = np.convolve(dfnc_design, dfnc_hrf)[:dfnc_length]
+        self.settings['dfnc_reponse'] = dfnc_response
+
+        # --- Calculate Condition Matrix ---
+        if self.settings['stage_method'] == 1:
+            dfnc_condi = (dfnc_response > self.settings['activation_level']).astype(float)
+            dfnc_window_condi = np.ones(dfnc_length + 1 - self.settings['window_size'])
+
+            if self.cb_activation.isChecked():
+                for idx in range(len(dfnc_window_condi)):
+                    if np.sum(dfnc_condi[idx:idx+self.settings['window_size']]) < (self.settings['window_size'] * self.settings['activation_percent'] / 100):
+                        dfnc_window_condi[idx] = 0
+
+            if self.cb_condition.isChecked():
+                for idx in range(len(dfnc_window_condi)):
+                    if np.sum(dfnc_design[idx:idx+self.settings['window_size']]) < (self.settings['window_size'] * self.settings['condition_percent'] / 100):
+                        dfnc_window_condi[idx] = 0
+        else:
+            stage_length = int(sum(run_stage_duration_list))
+            if stage_length == (dfnc_length + 1 - self.settings['window_size']):
+                stage_design = np.zeros(stage_length)
+                duration_list_cs = np.cumsum(run_stage_duration_list).astype(int)
+                stage_design[:duration_list_cs[0]] = run_stage_condition_list[0]
+                for idx in range(1, len(run_stage_condition_list)):
+                    stage_design[duration_list_cs[idx-1]:duration_list_cs[idx]] = run_stage_condition_list[idx]
+                dfnc_window_condi = stage_design
+            else:
+                QMessageBox.critical(self, "Error", "The specified stage does not match design and window size")
+                return
+
+        self.settings['dfnc_window_condi'] = dfnc_window_condi
+
+        dfnc_condi_with_window_n = np.convolve(np.ones(self.settings['window_size']), dfnc_window_condi)
+        dfnc_condi_with_window = (dfnc_condi_with_window_n > 0).astype(float)
+
+        # --- Plot ---
+        ax = self.ax
+        ax.clear()
+
+        design_switch_point = np.where(np.diff(self.settings['dfnc_design']) != 0)[0]
+        design_time_point = np.concatenate([[0], np.repeat(design_switch_point + 0.5, 2), [dfnc_length]])
+        design_value_point = np.concatenate([
+            [self.settings['dfnc_design'][0], self.settings['dfnc_design'][0]],
+            np.repeat(self.settings['dfnc_design'][design_switch_point + 1], 2),
+            [self.settings['dfnc_design'][-1]]
+        ])
+
+        # Fix mismatch in x and y lengths
+        min_len = min(len(design_time_point), len(design_value_point))
+        design_time_point = design_time_point[:min_len]
+        design_value_point = design_value_point[:min_len]
+
+        dfnc_response_min = np.min(dfnc_response)
+        dfnc_response_max = np.max(dfnc_response)
+        ax.set_xlim(0, dfnc_length)
+        ax.set_ylim(dfnc_response_min - 0.1, dfnc_response_max + 0.1)
+
+        self.gatd_plot.pholder_window = []
+        self.gatd_plot.max_overlap_window = int(np.max(dfnc_condi_with_window_n))
+
+        for i in range(1, self.gatd_plot.max_overlap_window + 1):
+            temp_condi = (dfnc_condi_with_window_n == i).astype(float)
+            window_switch_point = np.where(np.diff(temp_condi) != 0)[0]
+            window_time_point = np.concatenate([[0], np.repeat(window_switch_point + 0.5, 2), [dfnc_length]])
+            window_value_point = np.concatenate([
+                [temp_condi[0], temp_condi[0]],
+                np.repeat(temp_condi[window_switch_point + 1], 2),
+                [temp_condi[-1]]
+            ])
+            min_len = min(len(window_time_point), len(window_value_point))
+            window_time_point = window_time_point[:min_len]
+            window_value_point = window_value_point[:min_len]
+            patch = ax.fill_between(
+                window_time_point,
+                window_value_point * (dfnc_response_max - dfnc_response_min + 0.2) + dfnc_response_min - 0.1,
+                dfnc_response_min - 0.1,
+                color=(0.4, 1.0, 0.3),
+                alpha=0.1 + i * 0.8 / self.gatd_plot.max_overlap_window
+            )
+            self.gatd_plot.pholder_window.append(patch)
+        print("Design durations (s):", run_design_duration_list_in_s)
+        print("TR:", self.settings['tr'])
+        print("Computed dfnc_length:", dfnc_length)
+        print("dfnc_design:", self.settings['dfnc_design'][:30])
+        print("dfnc_reponse:", self.settings['dfnc_reponse'][:30])
+        self.gatd_plot.pholder_hrf, = ax.plot(range(dfnc_length), dfnc_response, '--', color=(1, 0.32, 0.16), linewidth=2)
+        self.gatd_plot.pholder_design, = ax.plot(design_time_point, design_value_point, 'k-', linewidth=1)
+        self.canvas.draw()
+
+        self.cb_task.setEnabled(True)
+        self.cb_mask.setEnabled(True)
+        self.cb_hrf.setEnabled(True)
+
     # Value changed function: TaskDesignCheckBox
     def gatd_p_task(self):
         value = self.cb_task.isChecked()
