@@ -1,8 +1,5 @@
 # view_window.py
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QLabel, QPushButton, QSlider, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QFileDialog, QMessageBox, QComboBox
-)
+from PyQt6.QtWidgets import ( QWidget, QLabel, QPushButton, QSlider, QGridLayout, QFileDialog, QMessageBox, QComboBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -33,7 +30,62 @@ class ViewWindow(QWidget    ):
         print("Frames:", d_corr)
         print("Total frames:", len(d_corr))
         self.gatv_update_network()
-        
+
+    def gatv_load_design(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Conditions", "", "MAT files (*.mat);;Text files (*.txt)")
+        if not file_path:
+            self.gatv_setting['iscondition'] = 0
+            return
+
+        mat_contents = scipy.io.loadmat(file_path, squeeze_me=True, struct_as_record=False)
+        window_condition = mat_contents.get('window_condition', None)
+        if window_condition is None:
+            QMessageBox.warning(self, "Error", "'window_condition' not found in file.")
+            return
+
+        # Unwrap MATLAB struct if needed
+        if isinstance(window_condition, np.ndarray):
+            window_condition = window_condition.item()
+
+        self.gatv_setting['condition'] = window_condition
+        self.gatv_setting['iscondition'] = 1
+
+        # Parse design_duration_list (MATLAB: str2num)
+        duration_str = window_condition.design_duration_list
+        if isinstance(duration_str, (np.ndarray, list)):
+            if hasattr(duration_str, 'tolist'):
+                duration_str = ''.join(duration_str.tolist())
+            else:
+                duration_str = str(duration_str)
+        design_duration_list = np.array([float(x) for x in duration_str.strip().split()])
+        tr = float(window_condition.tr)
+        dfnc_length = int(np.floor(np.sum(design_duration_list) / tr))
+        dfnc_reponse = np.array(window_condition.dfnc_reponse).flatten()
+        dfnc_design = np.array(window_condition.dfnc_design).flatten()
+
+        self.task_design_ax.clear()
+        self.gatv_plot['pholder_hrf'], = self.task_design_ax.plot(
+            np.arange(1, dfnc_length + 1), dfnc_reponse, '--', color=(1, 0.32, 0.16), linewidth=2
+        )
+        self.task_design_ax.set_xlim([0, dfnc_length])
+        self.task_design_ax.set_ylim([0, np.max(dfnc_reponse) + 0.1])
+        self.gatv_plot['pholder_design'], = self.task_design_ax.plot(
+            np.arange(1, dfnc_length + 1), dfnc_design, 'k', linewidth=1
+        )
+
+        w_start = self.gatv_setting.get('frame_cur', 1)
+        w_end = w_start + int(window_condition.window_size)
+        self.gatv_plot['pholder_window'] = self.task_design_ax.fill_between(
+            [w_start, w_end, w_end, w_start], [0, 0, 3, 3], color=(1, 0.96, 0.4), alpha=0.2
+        )
+        self.task_design_canvas.draw()
+
+        self.frame_slider.setMaximum(dfnc_length)
+        self.gatv_data['data_length'] = len(dfnc_reponse)
+        self.gatv_data['data_frame_length'] = len(np.array(window_condition.dfnc_window_condi).flatten())
+        self.gatv_data['data_length_diff'] = int(np.floor(
+            (self.gatv_data['data_length'] - self.gatv_data['data_frame_length']) / 2
+        ))
     def gatv_update_network(self):
         if 'networks' in self.gatv_setting:
             self.gatv_setting['frame_cur'] = int(self.frame_slider.value())
@@ -82,7 +134,7 @@ class ViewWindow(QWidget    ):
         # LoadProcessedFileButton
         self.load_processed_button = QPushButton("Load Processed File")
         self.load_processed_button.clicked.connect(self.gatv_load_file)
-        layout.addWidget(self.load_processed_button, 2, 0)
+        layout.addWidget(self.load_processed_button, 2, 1)
 
         # UIAxes_TaskDesign
         self.task_design_canvas = FigureCanvas(Figure())
@@ -96,8 +148,8 @@ class ViewWindow(QWidget    ):
 
         # LoadTemporalMaskButton
         self.load_temporal_button = QPushButton("Load Temporal Mask")
-        # self.load_temporal_button.clicked.connect(self.gatv_load_design)
-        layout.addWidget(self.load_temporal_button, 2, 1)
+        self.load_temporal_button.clicked.connect(self.gatv_load_design)
+        layout.addWidget(self.load_temporal_button, 2, 0)
 
         # LoadNetworkPropertyFileButton
         self.load_property_button = QPushButton("Load Network Property File")
