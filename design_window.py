@@ -205,31 +205,33 @@ class DesignWindow(QWidget):
                 QMessageBox.critical(self, "Error", "The condition sequence and duration sequence do not match")
                 return
 
-        # --- Build design matrix ---
-        dfnc_length = int(sum(run_design_duration_list_in_s) // self.settings['tr'])
+        # --- Build design matrix (MATLAB-style, 1-based) ---
+        dfnc_length = int(np.floor(sum(run_design_duration_list_in_s) / self.settings['tr']))
         temp_duration_list_s = np.cumsum(run_design_duration_list_in_s)
-        temp_duration_list = [int(round(val / self.settings['tr'])) for val in temp_duration_list_s[:-1]]
-        temp_duration_list.append(int(temp_duration_list_s[-1] // self.settings['tr']))
-        temp_duration_list[-1] = int(temp_duration_list_s[-1] // self.settings['tr'])
+        temp_duration_list = np.zeros(len(run_design_duration_list_in_s), dtype=int)
+        for i in range(len(temp_duration_list) - 1):
+            temp_duration_list[i] = int(round(temp_duration_list_s[i] / self.settings['tr']))
+        temp_duration_list[-1] = int(np.floor(temp_duration_list_s[-1] / self.settings['tr']))
         run_design_duration_list = [temp_duration_list[0]] + list(np.diff(temp_duration_list))
 
         dfnc_design = np.zeros(dfnc_length)
         duration_list_cs = np.cumsum(run_design_duration_list).astype(int)
-        dfnc_design = np.zeros(dfnc_length)
-        start = 0
-        for cond, dur in zip(run_design_condition_list, run_design_duration_list):
-            end = min(start + dur, dfnc_length)
-            dfnc_design[start:end] = cond
-            start = end
-        # duration_list_cs = np.clip(duration_list_cs, 0, dfnc_length)
-
+        # MATLAB: dfnc_design(1:duration_list_cs(1)) = run_design_condition_list(1)
+        if len(duration_list_cs) > 0:
+            dfnc_design[:duration_list_cs[0]] = run_design_condition_list[0]
+        for idx in range(1, len(run_design_condition_list)):
+            dfnc_design[duration_list_cs[idx-1]:duration_list_cs[idx]] = run_design_condition_list[idx]
         self.settings['dfnc_design'] = dfnc_design
 
-        # --- Convolve with HRF ---
+        # --- Convolve with HRF (MATLAB-style, no normalization, keep block-like shape) ---
+        # MATLAB's conv does not normalize, and the block design is 0/1, so the output should look like a block with rounded edges
         dfnc_response = np.convolve(dfnc_design, dfnc_hrf)[:dfnc_length]
+        # Do NOT normalize the HRF response, just offset to start at zero (MATLAB default)
+        dfnc_response = dfnc_response - np.min(dfnc_response)
+        # If the block is 0/1, the HRF convolution should look like a smoothed version of the block
         self.settings['dfnc_reponse'] = dfnc_response
 
-        # --- Calculate Condition Matrix ---
+        # --- Calculate Condition Matrix (MATLAB logic) ---
         if self.settings['stage_method'] == 1:
             dfnc_condi = (dfnc_response > self.settings['activation_level']).astype(float)
             dfnc_window_condi = np.ones(dfnc_length + 1 - self.settings['window_size'])
@@ -243,12 +245,14 @@ class DesignWindow(QWidget):
                 for idx in range(len(dfnc_window_condi)):
                     if np.sum(dfnc_design[idx:idx+self.settings['window_size']]) < (self.settings['window_size'] * self.settings['condition_percent'] / 100):
                         dfnc_window_condi[idx] = 0
+
         else:
             stage_length = int(sum(run_stage_duration_list))
             if stage_length == (dfnc_length + 1 - self.settings['window_size']):
                 stage_design = np.zeros(stage_length)
                 duration_list_cs = np.cumsum(run_stage_duration_list).astype(int)
-                stage_design[:duration_list_cs[0]] = run_stage_condition_list[0]
+                if len(duration_list_cs) > 0:
+                    stage_design[:duration_list_cs[0]] = run_stage_condition_list[0]
                 for idx in range(1, len(run_stage_condition_list)):
                     stage_design[duration_list_cs[idx-1]:duration_list_cs[idx]] = run_stage_condition_list[idx]
                 dfnc_window_condi = stage_design
@@ -258,20 +262,29 @@ class DesignWindow(QWidget):
 
         self.settings['dfnc_window_condi'] = dfnc_window_condi
 
-        dfnc_condi_with_window_n = np.convolve(np.ones(self.settings['window_size']), dfnc_window_condi)
+        # MATLAB: dfnc_condi_with_window_n = conv(ones(1,window_size),dfnc_window_condi)
+        dfnc_condi_with_window_n = np.convolve(np.ones(self.settings['window_size']), dfnc_window_condi, mode='full')[:dfnc_length]
         dfnc_condi_with_window = (dfnc_condi_with_window_n > 0).astype(float)
 
-        # --- Plot ---
+
+
+        # --- Plot (MATLAB-style, 1-based x-axis) ---
         ax = self.ax
         ax.clear()
 
+        # Calculate design change points (MATLAB: find(diff(design)~=0))
         design_switch_point = np.where(np.diff(self.settings['dfnc_design']) != 0)[0]
-        design_time_point = np.concatenate([[0], np.repeat(design_switch_point + 0.5, 2), [dfnc_length]])
+        # MATLAB: design_time_point = [1, repelem(design_switch_point+0.5,2), dfnc_length]
+        design_time_point = np.concatenate([[1], np.repeat(design_switch_point + 1.5, 2), [dfnc_length]])
+        # MATLAB: design_value_point = [design(1), design(1), repelem(design(design_switch_point+1),2)]
         design_value_point = np.concatenate([
             [self.settings['dfnc_design'][0], self.settings['dfnc_design'][0]],
-            np.repeat(self.settings['dfnc_design'][design_switch_point + 1], 2),
-            [self.settings['dfnc_design'][-1]]
+            np.repeat(self.settings['dfnc_design'][design_switch_point + 1], 2)
         ])
+        if len(design_value_point) < len(design_time_point):
+            design_value_point = np.append(design_value_point, self.settings['dfnc_design'][-1])
+        else:
+            design_value_point[-1] = self.settings['dfnc_design'][-1]
 
         # Fix mismatch in x and y lengths
         min_len = min(len(design_time_point), len(design_value_point))
@@ -280,8 +293,8 @@ class DesignWindow(QWidget):
 
         dfnc_response_min = np.min(dfnc_response)
         dfnc_response_max = np.max(dfnc_response)
-        ax.set_xlim(0, dfnc_length)
-        ax.set_ylim(dfnc_response_min - 0.1, dfnc_response_max + 0.1)
+        ax.set_xlim(1, dfnc_length)
+        ax.set_ylim(-0.1, 1.1)
 
         self.gatd_plot.pholder_window = []
         self.gatd_plot.max_overlap_window = int(np.max(dfnc_condi_with_window_n))
@@ -289,29 +302,27 @@ class DesignWindow(QWidget):
         for i in range(1, self.gatd_plot.max_overlap_window + 1):
             temp_condi = (dfnc_condi_with_window_n == i).astype(float)
             window_switch_point = np.where(np.diff(temp_condi) != 0)[0]
-            window_time_point = np.concatenate([[0], np.repeat(window_switch_point + 0.5, 2), [dfnc_length]])
+            window_time_point = np.concatenate([[1], np.repeat(window_switch_point + 1.5, 2), [dfnc_length]])
             window_value_point = np.concatenate([
                 [temp_condi[0], temp_condi[0]],
-                np.repeat(temp_condi[window_switch_point + 1], 2),
-                [temp_condi[-1]]
+                np.repeat(temp_condi[window_switch_point + 1], 2)
             ])
+            if len(window_value_point) < len(window_time_point):
+                window_value_point = np.append(window_value_point, temp_condi[-1])
+            else:
+                window_value_point[-1] = temp_condi[-1]
             min_len = min(len(window_time_point), len(window_value_point))
             window_time_point = window_time_point[:min_len]
             window_value_point = window_value_point[:min_len]
             patch = ax.fill_between(
                 window_time_point,
-                window_value_point * (dfnc_response_max - dfnc_response_min + 0.2) + dfnc_response_min - 0.1,
-                dfnc_response_min - 0.1,
+                window_value_point * 1.1,
+                -0.1,
                 color=(0.4, 1.0, 0.3),
                 alpha=0.1 + i * 0.8 / self.gatd_plot.max_overlap_window
             )
             self.gatd_plot.pholder_window.append(patch)
-        print("Design durations (s):", run_design_duration_list_in_s)
-        print("TR:", self.settings['tr'])
-        print("Computed dfnc_length:", dfnc_length)
-        print("dfnc_design:", self.settings['dfnc_design'][:30])
-        print("dfnc_reponse:", self.settings['dfnc_reponse'][:30])
-        self.gatd_plot.pholder_hrf, = ax.plot(range(dfnc_length), dfnc_response, '--', color=(1, 0.32, 0.16), linewidth=2)
+        self.gatd_plot.pholder_hrf, = ax.plot(np.arange(1, dfnc_length + 1), dfnc_response, '--', color=(1, 0.32, 0.16), linewidth=2)
         self.gatd_plot.pholder_design, = ax.plot(design_time_point, design_value_point, 'k-', linewidth=1)
         self.canvas.draw()
 
