@@ -13,7 +13,7 @@ import os
 import numpy as np
 from nilearn.glm.first_level import spm_hrf
 from PyQt6.QtWidgets import QMessageBox
-
+from spm_hrf import spm_hrf as my_spm_hrf
 class DesignWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -143,14 +143,9 @@ class DesignWindow(QWidget):
         self.parameters_update_setting()
 
         try:
-            dt = 0.1  # Time resolution in seconds
-            hrf_at_fine_resolution = spm_hrf(tr=dt)
-
-            # Downsample HRF to match TR (e.g., TR = 1s)
-            n_trs = int(len(hrf_at_fine_resolution) * dt / self.settings['tr'])
-            sample_points = np.arange(0, n_trs) * self.settings['tr']
-            hrf_times = np.arange(len(hrf_at_fine_resolution)) * dt
-            dfnc_hrf = np.interp(sample_points, hrf_times, hrf_at_fine_resolution)
+            # Use your own coded spm_hrf (from spm_hrf.py) to calculate dfnc_hrf
+            dfnc_hrf, _ = my_spm_hrf(self.settings['tr'])
+            print(dfnc_hrf)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"HRF calculation failed: {e}")
             return
@@ -226,9 +221,7 @@ class DesignWindow(QWidget):
         # --- Convolve with HRF (MATLAB-style, no normalization, keep block-like shape) ---
         # MATLAB's conv does not normalize, and the block design is 0/1, so the output should look like a block with rounded edges
         dfnc_response = np.convolve(dfnc_design, dfnc_hrf)[:dfnc_length]
-        # Do NOT normalize the HRF response, just offset to start at zero (MATLAB default)
-        dfnc_response = dfnc_response - np.min(dfnc_response)
-        # If the block is 0/1, the HRF convolution should look like a smoothed version of the block
+        # Do NOT normalize or shift the HRF response; keep as in MATLAB
         self.settings['dfnc_reponse'] = dfnc_response
 
         # --- Calculate Condition Matrix (MATLAB logic) ---
