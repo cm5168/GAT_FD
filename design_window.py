@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QFileDialog
 from scipy.io import savemat
 import os
 import numpy as np
-from nilearn.glm.first_level import spm_hrf
+# from nilearn.glm.first_level import spm_hrf
 from PyQt6.QtWidgets import QMessageBox
 from spm_hrf import spm_hrf as my_spm_hrf
 class DesignWindow(QWidget):
@@ -141,11 +141,9 @@ class DesignWindow(QWidget):
 
     def gatd_update_design(self):
         self.parameters_update_setting()
-
         try:
-            # Use your own coded spm_hrf (from spm_hrf.py) to calculate dfnc_hrf
             dfnc_hrf, _ = my_spm_hrf(self.settings['tr'])
-            print(dfnc_hrf)
+            # print(dfnc_hrf)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"HRF calculation failed: {e}")
             return
@@ -217,11 +215,9 @@ class DesignWindow(QWidget):
         for idx in range(1, len(run_design_condition_list)):
             dfnc_design[duration_list_cs[idx-1]:duration_list_cs[idx]] = run_design_condition_list[idx]
         self.settings['dfnc_design'] = dfnc_design
-
         # --- Convolve with HRF (MATLAB-style, no normalization, keep block-like shape) ---
         # MATLAB's conv does not normalize, and the block design is 0/1, so the output should look like a block with rounded edges
         dfnc_response = np.convolve(dfnc_design, dfnc_hrf)[:dfnc_length]
-        # Do NOT normalize or shift the HRF response; keep as in MATLAB
         self.settings['dfnc_reponse'] = dfnc_response
 
         # --- Calculate Condition Matrix (MATLAB logic) ---
@@ -258,9 +254,6 @@ class DesignWindow(QWidget):
         # MATLAB: dfnc_condi_with_window_n = conv(ones(1,window_size),dfnc_window_condi)
         dfnc_condi_with_window_n = np.convolve(np.ones(self.settings['window_size']), dfnc_window_condi, mode='full')[:dfnc_length]
         dfnc_condi_with_window = (dfnc_condi_with_window_n > 0).astype(float)
-
-
-
         # --- Plot (MATLAB-style, 1-based x-axis) ---
         ax = self.ax
         ax.clear()
@@ -283,9 +276,6 @@ class DesignWindow(QWidget):
         min_len = min(len(design_time_point), len(design_value_point))
         design_time_point = design_time_point[:min_len]
         design_value_point = design_value_point[:min_len]
-
-        dfnc_response_min = np.min(dfnc_response)
-        dfnc_response_max = np.max(dfnc_response)
         ax.set_xlim(1, dfnc_length)
         ax.set_ylim(-0.1, 1.1)
 
@@ -327,25 +317,25 @@ class DesignWindow(QWidget):
     def gatd_p_task(self):
         value = self.cb_task.isChecked()
         if value:
-            self.gatd_plot.pholder_hrf.setVisible(True)
+            self.gatd_plot.pholder_hrf.set_visible(True)
         else:
-            self.gatd_plot.pholder_hrf.setVisible(False)
+            self.gatd_plot.pholder_hrf.set_visible(False)
     # Value changed function: HemodynamicResponseCheckBox
     def gatd_p_hrf(self):
         value = self.cb_hrf.isChecked()
         if value:
-            self.gatd_plot.pholder_hrf.setVisible(True)
+            self.gatd_plot.pholder_hrf.set_visible(True)
         else:
-            self.gatd_plot.pholder_hrf.setVisible(False)
+            self.gatd_plot.pholder_hrf.set_visible(False)
     def gatd_p_window(self):
         value = self.cb_mask.isChecked()
 
         if value:
             for i in range(self.gatd_plot.max_overlap_window):
-                self.gatd_plot.pholder_window[i].setVisible(True)
+                self.gatd_plot.pholder_window[i].set_visible(True)
         else:
             for i in range(self.gatd_plot.max_overlap_window):
-                self.gatd_plot.pholder_window[i].setVisible(False)
+                self.gatd_plot.pholder_window[i].set_visible(False)
     # Button pushed function: SaveDesignMatrixButton
     def gatd_output_mat(self):
         filename, _ = QFileDialog.getSaveFileName(

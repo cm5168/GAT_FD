@@ -1,18 +1,14 @@
 import numpy as np
 from scipy.special import gamma
-
-
 def spm_Gpdf(u, h, l):
     """
     Gamma probability density function as used in SPM.
-
     u : array-like
         Time vector (non-negative).
     h : float
         Shape parameter.
     l : float
         Scale parameter.
-
     Returns
     -------
     pdf : ndarray
@@ -25,12 +21,9 @@ def spm_Gpdf(u, h, l):
         0.0
     )
     return pdf
-
-
 def spm_hrf(RT, P=None, T=None):
     """
     Haemodynamic response function
-
     Parameters
     ----------
     RT : float
@@ -40,7 +33,6 @@ def spm_hrf(RT, P=None, T=None):
         Defaults to [6, 16, 1, 1, 6, 0, 32].
     T : int, optional
         Microtime resolution. Defaults to 16.
-
     Returns
     -------
     hrf : ndarray

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.special import gammaln
-
+# For referenc
+#  gammaln is the log of the gamma function, used for numerical stability in the PDF calculation.
 def spm_Gpdf(x, h, l):
     """
     Gamma PDF as implemented in SPM.
