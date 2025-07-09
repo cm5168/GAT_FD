@@ -504,22 +504,24 @@ class ProcessWindow(QWidget):
                 atlas_data = atlas_data_las
                 func_shape = func_data_las.shape[:3]  # Define func_shape for output_shape
                 # --- Affine transform and cropping as before, but use reoriented data ---
+                # Step 1: Resample atlas to its own shape (like imwarp in MATLAB)
                 atlas_affine = atlas_nib.affine
                 func_affine = func_img.affine
+                # Compute the transform from atlas to func space
                 affine_transform_mat = np.linalg.inv(func_affine) @ atlas_affine
+                # Resample atlas to the shape it would have after imwarp (let output_shape be None)
                 resampled_atlas = affine_transform(
                     atlas_data_las,
                     matrix=affine_transform_mat[:3, :3],
                     offset=affine_transform_mat[:3, 3],
-                    output_shape=func_shape,
                     order=0
                 )
-                # Assign for compatibility with old debug/print statements
                 fnc_rawdata_tt = resampled_atlas
                 resampled_shape = resampled_atlas.shape
                 target_shape = func_shape
                 print('fnc_rawdata_tt shape:', fnc_rawdata_tt.shape)
                 print('atlas (target) shape:', target_shape)
+                # Step 2: Crop resampled atlas to match func_shape, using MATLAB-style indices
                 def get_crop_indices(src, tgt):
                     if src > tgt:
                         shift = (src - tgt) // 2
