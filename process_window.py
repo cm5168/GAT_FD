@@ -2,13 +2,15 @@
 import os
 import numpy as np
 import nibabel as nib
-import pywt
+from scipy.ndimage import affine_transform
 from scipy.io import savemat, loadmat
-from nilearn.image import resample_to_img
 from scipy.signal import butter, filtfilt
 from PyQt6.QtWidgets import QWidget, QLabel,QComboBox, QFileDialog, QPushButton, QListWidget, QProgressDialog,QLineEdit, QFormLayout, QMessageBox
 from PyQt6.QtGui import QIntValidator 
 from nilearn.input_data import NiftiLabelsMasker
+from nilearn.image import resample_to_img
+from nibabel.orientations import io_orientation, axcodes2ornt, ornt_transform, apply_orientation
+
 class ProcessWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -461,17 +463,108 @@ class ProcessWindow(QWidget):
             if self.file_format_dropdown.currentIndex() == 0:
                 # Load NIfTI with memory mapping
                 func_img = nib.load(file_path, mmap=True)
-                fnc_raw_len = func_img.shape[3]
+                func_data = func_img.get_fdata()
+                fnc_raw_len = func_data.shape[3]
                 fnc_window_count = fnc_raw_len - fnc_window_size + 1
 
-                # ——— Nilearn‐based ROI extraction ———
-                masker = NiftiLabelsMasker(
-                    labels_img=atlas_img,
-                    standardize=False,
-                    memory='nilearn_cache', memory_level=1
+                # --- Resample atlas to match functional image (MATLAB-style) ---
+                # --- Reorient both atlas and func images to RAS+ orientation ---
+                if isinstance(atlas_img, str):
+                    atlas_nib = nib.load(atlas_img)
+                else:
+                    atlas_nib = nib.Nifti1Image(atlas_img, func_img.affine)
+                atlas_data = atlas_nib.get_fdata()
+                func_data = func_img.get_fdata()
+                # Print voxel size and orientation info for debug
+                print("Atlas voxel size:", atlas_nib.header.get_zooms()[:3])
+                print("Atlas affine:\n", atlas_nib.affine)
+                print("Atlas orientation:", nib.aff2axcodes(atlas_nib.affine))
+                print("Atlas array shape:", atlas_data.shape)
+                print("Func voxel size:", func_img.header.get_zooms()[:3])
+                print("Func affine:\n", func_img.affine)
+                print("Func orientation:", nib.aff2axcodes(func_img.affine))
+                print("Func array shape:", func_data.shape)
+                # --- Reorient to LAS (Left-Anterior-Superior) to match MATLAB convention ---
+                from nibabel.orientations import io_orientation, axcodes2ornt, ornt_transform, apply_orientation
+                target_ornt = axcodes2ornt(('L', 'A', 'S'))
+                # Atlas reorient
+                atlas_ornt = io_orientation(atlas_nib.affine)
+                atlas_transform = ornt_transform(atlas_ornt, target_ornt)
+                atlas_data_las = apply_orientation(atlas_data, atlas_transform)
+                print("Atlas orientation after LAS reorient:", ('L', 'A', 'S'))
+                print("Atlas array shape after LAS reorient:", atlas_data_las.shape)
+                # Func reorient
+                func_ornt = io_orientation(func_img.affine)
+                func_transform = ornt_transform(func_ornt, target_ornt)
+                func_data_las = apply_orientation(func_data, func_transform)
+                print("Func orientation after LAS reorient:", ('L', 'A', 'S'))
+                print("Func array shape after LAS reorient:", func_data_las.shape)
+                # Use func_data_las and atlas_data_las for downstream processing
+                func_data = func_data_las
+                atlas_data = atlas_data_las
+                func_shape = func_data_las.shape[:3]  # Define func_shape for output_shape
+                # --- Affine transform and cropping as before, but use reoriented data ---
+                atlas_affine = atlas_nib.affine
+                func_affine = func_img.affine
+                affine_transform_mat = np.linalg.inv(func_affine) @ atlas_affine
+                resampled_atlas = affine_transform(
+                    atlas_data_las,
+                    matrix=affine_transform_mat[:3, :3],
+                    offset=affine_transform_mat[:3, 3],
+                    output_shape=func_shape,
+                    order=0
                 )
-                # shape: (n_timepoints, n_regions)
-                atlased_data = masker.fit_transform(func_img)
+                # Assign for compatibility with old debug/print statements
+                fnc_rawdata_tt = resampled_atlas
+                resampled_shape = resampled_atlas.shape
+                target_shape = func_shape
+                print('fnc_rawdata_tt shape:', fnc_rawdata_tt.shape)
+                print('atlas (target) shape:', target_shape)
+                def get_crop_indices(src, tgt):
+                    if src > tgt:
+                        shift = (src - tgt) // 2
+                        a_start, a_end = 0, tgt
+                        d_start, d_end = shift, shift + tgt
+                    else:
+                        shift = (tgt - src) // 2
+                        a_start, a_end = shift, shift + src
+                        d_start, d_end = 0, src
+                    return a_start, a_end, d_start, d_end
+                axs, axe, dxs, dxe = get_crop_indices(target_shape[0], resampled_shape[0])
+                ays, aye, dys, dye = get_crop_indices(target_shape[1], resampled_shape[1])
+                azs, aze, dzs, dze = get_crop_indices(target_shape[2], resampled_shape[2])
+                print(f'axs: {axs+1} to {axe}')
+                print(f'ays: {ays+1} to {aye}')
+                print(f'azs: {azs+1} to {aze}')
+                print(f'dxs: {dxs+1} to {dxe}')
+                print(f'dys: {dys+1} to {dye}')
+                print(f'dzs: {dzs+1} to {dze}')
+                cropped_atlas = np.zeros(target_shape, dtype=resampled_atlas.dtype)
+                cropped_atlas[axs:axe, ays:aye, azs:aze] = resampled_atlas[dxs:dxe, dys:dye, dzs:dze]
+                fnc_pro_atlas_masks = cropped_atlas.astype(np.int32)
+
+                # Shift and trim data to match atlas (debug)
+                print('Before shift/trim:')
+                print('fnc_rawdata_tt shape:', fnc_rawdata_tt.shape)
+                print('atlas (target) shape:', func_data[..., 0].shape)
+                # In Python, nilearn's resample_to_img already does this alignment, but for debug, print the region indices if you were to crop manually
+                # Example indices (not used, for debug only):
+                # axs, axe, ays, aye, azs, aze = 0, fnc_rawdata_tt.shape[0], 0, fnc_rawdata_tt.shape[1], 0, fnc_rawdata_tt.shape[2]
+                print('No manual crop indices needed in Python (nilearn handles this)')
+
+                # Use ROI order from .txt file (MATLAB style)
+                n_x, n_y, n_z, n_t = func_data.shape
+                flat_func = func_data.reshape(-1, n_t)  # (n_voxels, n_timepoints)
+                flat_atlas = fnc_pro_atlas_masks.flatten()  # (n_voxels,)
+                roi_labels = np.arange(1, len(self.settings['atlas_list']) + 1)  # 1-based labels
+                atlased_data = np.zeros((n_t, len(roi_labels)), dtype=np.float32)
+                for idx, label in enumerate(roi_labels):
+                    mask = (flat_atlas == label)
+                    if np.any(mask):
+                        ts = flat_func[mask, :]
+                        atlased_data[:, idx] = ts.mean(axis=0)
+                    else:
+                        atlased_data[:, idx] = 0
             else:
                 # .mat input: load full matrix (time × regions)
                 mat = loadmat(file_path)
