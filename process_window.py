@@ -508,39 +508,63 @@ class ProcessWindow(QWidget):
                 func_affine = func_img.affine
                 # Compute transform to resample func to atlas space (like MATLAB imwarp)
                 affine_transform_mat = np.linalg.inv(atlas_affine) @ func_affine
-                # Resample the FIRST VOLUME ONLY to get the shape for cropping (like MATLAB)
+                # Resample the FIRST VOLUME ONLY without forcing output_shape (let it be as large as needed)
                 from scipy.ndimage import affine_transform
                 func_first_vol = func_data_las[..., 0]
+                # Estimate the shape of the resampled data (let scipy decide)
                 fnc_rawdata_t = affine_transform(
                     func_first_vol,
                     matrix=affine_transform_mat[:3, :3],
                     offset=affine_transform_mat[:3, 3],
                     order=1
                 )
-                print('fnc_rawdata_t shape:', fnc_rawdata_t.shape)
+                print('fnc_rawdata_t shape (no forced output_shape):', fnc_rawdata_t.shape)
                 print('atlas (target) shape:', atlas_data_las.shape)
                 # Now, crop indices as in MATLAB
+                # Helper to get crop indices
                 def get_crop_indices(data_dim, atlas_dim):
-                    # Direct MATLAB-to-Python translation (0-based)
                     if data_dim > atlas_dim:
                         xshift = (data_dim - atlas_dim) // 2
-                        a_start, a_end = 0, atlas_dim
-                        d_start, d_end = xshift, atlas_dim + xshift
+                        axs = 0
+                        axe = atlas_dim
+                        dxs = xshift
+                        dxe = xshift + atlas_dim
                     else:
                         xshift = (atlas_dim - data_dim) // 2
-                        a_start, a_end = xshift, data_dim + xshift
-                        d_start, d_end = 0, data_dim
-                    return a_start, a_end, d_start, d_end
-                axs, axe, dxs, dxe = get_crop_indices(fnc_rawdata_t.shape[0], atlas_data_las.shape[0])
-                ays, aye, dys, dye = get_crop_indices(fnc_rawdata_t.shape[1], atlas_data_las.shape[1])
-                azs, aze, dzs, dze = get_crop_indices(fnc_rawdata_t.shape[2], atlas_data_las.shape[2])
+                        axs = xshift
+                        axe = xshift + data_dim
+                        dxs = 0
+                        dxe = data_dim
+                    return axs, axe, dxs, dxe, xshift
+                fnc_rawdata_tt_s = fnc_rawdata_t.shape  # shape of resampled data
+                print('DEBUG: fnc_rawdata_tt_s (resampled data shape):', fnc_rawdata_tt_s)
+                atlas_shape = atlas_data_las.shape      # shape of atlas
+                axs, axe, dxs, dxe, xshift_x = get_crop_indices(fnc_rawdata_tt_s[0], atlas_shape[0])
+                ays, aye, dys, dye, xshift_y = get_crop_indices(fnc_rawdata_tt_s[1], atlas_shape[1])
+                azs, aze, dzs, dze, xshift_z = get_crop_indices(fnc_rawdata_tt_s[2], atlas_shape[2])
+                print('Before shift/trim:')
+                print(fnc_rawdata_tt_s)
+                print(atlas_shape)
+                if fnc_rawdata_tt_s[0] > atlas_shape[0]:
+                    print(f'X shift (data > atlas): xshift = {xshift_x}')
+                else:
+                    print(f'X shift (atlas > data): xshift = {xshift_x}')
+                if fnc_rawdata_tt_s[1] > atlas_shape[1]:
+                    print(f'Y shift (data > atlas): xshift = {xshift_y}')
+                else:
+                    print(f'Y shift (atlas > data): xshift = {xshift_y}')
+                if fnc_rawdata_tt_s[2] > atlas_shape[2]:
+                    print(f'Z shift (data > atlas): xshift = {xshift_z}')
+                else:
+                    print(f'Z shift (atlas > data): xshift = {xshift_z}')
+                print('--- Cropping/shift indices summary (Python) ---')
                 print(f'axs: {axs+1} to {axe}')
                 print(f'ays: {ays+1} to {aye}')
                 print(f'azs: {azs+1} to {aze}')
                 print(f'dxs: {dxs+1} to {dxe}')
                 print(f'dys: {dys+1} to {dye}')
                 print(f'dzs: {dzs+1} to {dze}')
-                # Crop the resampled data to match the atlas shape (MATLAB-style: atlas indices always start at 0)
+                # Crop or pad the resampled data to match the atlas shape (MATLAB-style)
                 cropped_func = np.zeros(atlas_data_las.shape + (func_data_las.shape[3],), dtype=func_data_las.dtype)
                 for t in range(func_data_las.shape[3]):
                     fnc_rawdata_t = affine_transform(
@@ -549,7 +573,33 @@ class ProcessWindow(QWidget):
                         offset=affine_transform_mat[:3, 3],
                         order=1
                     )
-                    cropped_func[axs:axe, ays:aye, azs:aze, t] = fnc_rawdata_t[dxs:dxe, dys:dye, dzs:dze]
+                    # Crop or pad as needed
+                    # If resampled data is larger, crop
+                    if fnc_rawdata_t.shape[0] > atlas_shape[0]:
+                        x_slice = slice(dxs, dxe)
+                    else:
+                        x_slice = slice(0, fnc_rawdata_t.shape[0])
+                    if fnc_rawdata_t.shape[1] > atlas_shape[1]:
+                        y_slice = slice(dys, dye)
+                    else:
+                        y_slice = slice(0, fnc_rawdata_t.shape[1])
+                    if fnc_rawdata_t.shape[2] > atlas_shape[2]:
+                        z_slice = slice(dzs, dze)
+                    else:
+                        z_slice = slice(0, fnc_rawdata_t.shape[2])
+                    cropped = fnc_rawdata_t[x_slice, y_slice, z_slice]
+                    # If cropped is smaller than atlas, pad
+                    pad_x = atlas_shape[0] - cropped.shape[0]
+                    pad_y = atlas_shape[1] - cropped.shape[1]
+                    pad_z = atlas_shape[2] - cropped.shape[2]
+                    px0 = pad_x // 2 if pad_x > 0 else 0
+                    py0 = pad_y // 2 if pad_y > 0 else 0
+                    pz0 = pad_z // 2 if pad_z > 0 else 0
+                    px1 = pad_x - px0 if pad_x > 0 else 0
+                    py1 = pad_y - py0 if pad_y > 0 else 0
+                    pz1 = pad_z - pz0 if pad_z > 0 else 0
+                    padded = np.pad(cropped, ((px0, px1), (py0, py1), (pz0, pz1)), mode='constant')
+                    cropped_func[..., t] = padded[:atlas_shape[0], :atlas_shape[1], :atlas_shape[2]]
                 func_data = cropped_func
                 print('Cropped func_data shape:', func_data.shape)
                 # ...existing code...
