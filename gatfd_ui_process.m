@@ -493,10 +493,10 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                         % Transform data into atlas space
                         fnc_rawdata_t=imwarp(fnc_rawdata(:,:,:,1),fnc_rawdata_info.Transform);
                         disp('fnc_rawdata_t:');
-                        disp(fnc_rawdata_t);
+                        %disp(fnc_rawdata_t);
                         fnc_rawdata_tt=imwarp(fnc_rawdata_t,fnc_pro_atlas_invtran);
                         disp('fnc_rawdata_tt:');
-                        disp(fnc_rawdata_tt);
+                        %disp(fnc_rawdata_tt);
                         fnc_rawdata_tt_s=size(fnc_rawdata_tt);
                         
                         % Shift and trim data to match atlas
@@ -517,35 +517,46 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                             dxe=fnc_rawdata_tt_s(1);
                         end
                             
+                        % --- Y dimension shift/trim logic ---
+                        % If the resampled data is larger than the atlas in Y, crop the center
                         if fnc_rawdata_tt_s(2)>fnc_pro_atlas_size(2)
                             xshift=floor((fnc_rawdata_tt_s(2)-fnc_pro_atlas_size(2))/2);
                             ays=1;
                             aye=fnc_pro_atlas_size(2);
                             dys=1+xshift;
                             dye=fnc_pro_atlas_size(2)+xshift;
+                            disp(['Y shift (data > atlas): xshift = ', num2str(xshift)]);
                         else
+                            % If the atlas is larger, pad/crop the center
                             xshift=floor((fnc_pro_atlas_size(2)-fnc_rawdata_tt_s(2))/2);
                             dys=1;
                             dye=fnc_rawdata_tt_s(2);
                             ays=1+xshift;
                             aye=fnc_rawdata_tt_s(2)+xshift;
+                            disp(['Y shift (atlas > data): xshift = ', num2str(xshift)]);
                         end
                         
+                        % --- Z dimension shift/trim logic ---
+                        % If the resampled data is larger than the atlas in Z, crop the center
                         if fnc_rawdata_tt_s(3)>fnc_pro_atlas_size(3)
                             xshift=floor((fnc_rawdata_tt_s(3)-fnc_pro_atlas_size(3))/2);
                             azs=1;
                             aze=fnc_pro_atlas_size(3);
                             dzs=1+xshift;
                             dze=fnc_pro_atlas_size(3)+xshift;
+                            disp(['Z shift (data > atlas): xshift = ', num2str(xshift)]);
                         else
+                            % If the atlas is larger, pad/crop the center
                             xshift=floor((fnc_pro_atlas_size(3)-fnc_rawdata_tt_s(3))/2);
                             dzs=1;
                             dze=fnc_rawdata_tt_s(3);
                             azs=1+xshift;
                             aze=fnc_rawdata_tt_s(3)+xshift;
+                            disp(['Z shift (atlas > data): xshift = ', num2str(xshift)]);
                         end
                         
-                        % After shift/trim, print the region indices
+                        % --- Print summary of region indices for debugging ---
+                        disp('--- Cropping/shift indices summary (MATLAB) ---');
                         disp(['axs: ', num2str(axs), ' to ', num2str(axe)]);
                         disp(['ays: ', num2str(ays), ' to ', num2str(aye)]);
                         disp(['azs: ', num2str(azs), ' to ', num2str(aze)]);

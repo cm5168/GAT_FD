@@ -504,56 +504,55 @@ class ProcessWindow(QWidget):
                 atlas_data = atlas_data_las
                 func_shape = func_data_las.shape[:3]  # Define func_shape for output_shape
                 # --- Affine transform and cropping as before, but use reoriented data ---
-                # Step 1: Resample atlas to its own shape (like imwarp in MATLAB)
                 atlas_affine = atlas_nib.affine
                 func_affine = func_img.affine
-                # Compute the transform from atlas to func space
-                affine_transform_mat = np.linalg.inv(func_affine) @ atlas_affine
-                # Resample atlas to the shape it would have after imwarp (let output_shape be None)
-                resampled_atlas = affine_transform(
-                    atlas_data_las,
+                # Compute transform to resample func to atlas space (like MATLAB imwarp)
+                affine_transform_mat = np.linalg.inv(atlas_affine) @ func_affine
+                # Resample the FIRST VOLUME ONLY to get the shape for cropping (like MATLAB)
+                from scipy.ndimage import affine_transform
+                func_first_vol = func_data_las[..., 0]
+                fnc_rawdata_t = affine_transform(
+                    func_first_vol,
                     matrix=affine_transform_mat[:3, :3],
                     offset=affine_transform_mat[:3, 3],
-                    order=0
+                    order=1
                 )
-                fnc_rawdata_tt = resampled_atlas
-                resampled_shape = resampled_atlas.shape
-                target_shape = func_shape
-                print('fnc_rawdata_tt shape:', fnc_rawdata_tt.shape)
-                print('atlas (target) shape:', target_shape)
-                # Step 2: Crop resampled atlas to match func_shape, using MATLAB-style indices
-                def get_crop_indices(src, tgt):
-                    if src > tgt:
-                        shift = (src - tgt) // 2
-                        a_start, a_end = 0, tgt
-                        d_start, d_end = shift, shift + tgt
+                print('fnc_rawdata_t shape:', fnc_rawdata_t.shape)
+                print('atlas (target) shape:', atlas_data_las.shape)
+                # Now, crop indices as in MATLAB
+                def get_crop_indices(data_dim, atlas_dim):
+                    # Direct MATLAB-to-Python translation (0-based)
+                    if data_dim > atlas_dim:
+                        xshift = (data_dim - atlas_dim) // 2
+                        a_start, a_end = 0, atlas_dim
+                        d_start, d_end = xshift, atlas_dim + xshift
                     else:
-                        shift = (tgt - src) // 2
-                        a_start, a_end = shift, shift + src
-                        d_start, d_end = 0, src
+                        xshift = (atlas_dim - data_dim) // 2
+                        a_start, a_end = xshift, data_dim + xshift
+                        d_start, d_end = 0, data_dim
                     return a_start, a_end, d_start, d_end
-                axs, axe, dxs, dxe = get_crop_indices(target_shape[0], resampled_shape[0])
-                ays, aye, dys, dye = get_crop_indices(target_shape[1], resampled_shape[1])
-                azs, aze, dzs, dze = get_crop_indices(target_shape[2], resampled_shape[2])
+                axs, axe, dxs, dxe = get_crop_indices(fnc_rawdata_t.shape[0], atlas_data_las.shape[0])
+                ays, aye, dys, dye = get_crop_indices(fnc_rawdata_t.shape[1], atlas_data_las.shape[1])
+                azs, aze, dzs, dze = get_crop_indices(fnc_rawdata_t.shape[2], atlas_data_las.shape[2])
                 print(f'axs: {axs+1} to {axe}')
                 print(f'ays: {ays+1} to {aye}')
                 print(f'azs: {azs+1} to {aze}')
                 print(f'dxs: {dxs+1} to {dxe}')
                 print(f'dys: {dys+1} to {dye}')
                 print(f'dzs: {dzs+1} to {dze}')
-                cropped_atlas = np.zeros(target_shape, dtype=resampled_atlas.dtype)
-                cropped_atlas[axs:axe, ays:aye, azs:aze] = resampled_atlas[dxs:dxe, dys:dye, dzs:dze]
-                fnc_pro_atlas_masks = cropped_atlas.astype(np.int32)
-
-                # Shift and trim data to match atlas (debug)
-                print('Before shift/trim:')
-                print('fnc_rawdata_tt shape:', fnc_rawdata_tt.shape)
-                print('atlas (target) shape:', func_data[..., 0].shape)
-                # In Python, nilearn's resample_to_img already does this alignment, but for debug, print the region indices if you were to crop manually
-                # Example indices (not used, for debug only):
-                # axs, axe, ays, aye, azs, aze = 0, fnc_rawdata_tt.shape[0], 0, fnc_rawdata_tt.shape[1], 0, fnc_rawdata_tt.shape[2]
-                print('No manual crop indices needed in Python (nilearn handles this)')
-
+                # Crop the resampled data to match the atlas shape (MATLAB-style: atlas indices always start at 0)
+                cropped_func = np.zeros(atlas_data_las.shape + (func_data_las.shape[3],), dtype=func_data_las.dtype)
+                for t in range(func_data_las.shape[3]):
+                    fnc_rawdata_t = affine_transform(
+                        func_data_las[..., t],
+                        matrix=affine_transform_mat[:3, :3],
+                        offset=affine_transform_mat[:3, 3],
+                        order=1
+                    )
+                    cropped_func[axs:axe, ays:aye, azs:aze, t] = fnc_rawdata_t[dxs:dxe, dys:dye, dzs:dze]
+                func_data = cropped_func
+                print('Cropped func_data shape:', func_data.shape)
+                # ...existing code...
                 # Use ROI order from .txt file (MATLAB style)
                 n_x, n_y, n_z, n_t = func_data.shape
                 flat_func = func_data.reshape(-1, n_t)  # (n_voxels, n_timepoints)
