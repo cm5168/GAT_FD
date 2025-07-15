@@ -1,6 +1,6 @@
 # network_window.py
 
-from PyQt6.QtWidgets import (QWidget, QLabel, QDialog, QVBoxLayout, QPushButton, QTextEdit, QListWidget,QMessageBox,QFileDialog, QComboBox, QCheckBox, QLineEdit, QGroupBox, QGridLayout, QApplication)
+from PyQt6.QtWidgets import (QWidget, QLabel, QPushButton,QVBoxLayout, QTextEdit, QListWidget, QMessageBox, QFileDialog, QComboBox, QCheckBox, QLineEdit, QGroupBox, QGridLayout, QApplication, QDialog)
 from PyQt6.QtCore import Qt
 from scipy.io import loadmat
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -176,6 +176,7 @@ class NetworkWindow(QWidget):
             self.list_nodes.clear()
             self.list_nodes.addItems(selected)
     def createComponents(self):
+        self.gatn_setting = {}
         self.setWindowTitle('GAT-FD - Network Property Calculation v0.2a')
         self.setGeometry(100, 100, 650, 788)
         # Main layout
