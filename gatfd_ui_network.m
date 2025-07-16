@@ -504,7 +504,16 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                             % Nodal
                             if run_if_nod
                                 for idx_meas=1:local_nod_count
-                                    temp_prop=local_nod_func{meas_nod_list(idx_meas)}(temp_net);
+                                    disp(['[DEBUG] File: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
+                                    disp(['[DEBUG] Nodal measure: ', local_nod_name{idx_meas}]);
+                                    disp(['[DEBUG] temp_net size: ', mat2str(size(temp_net))]);
+                                    disp('[DEBUG] temp_net (binarized):');
+                                    disp(temp_net);
+                                    disp(['[DEBUG] Selected nodes: ', strjoin(app.gatn_setting.node_list_selected, ', ')]);
+                                    temp_prop=app.gatn_measure.nod_func{meas_nod_list(idx_meas)}(temp_net);
+                                    disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
+                                    disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
+                                    disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
                                     network_data_mat_nodal_para(idx_frame,idx_meas,idx_thr,:)=temp_prop(nodal_idx);
                                 end
                             end
@@ -585,7 +594,13 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                             % Nodal
                             if run_if_nod
                                 for idx_meas=1:local_nod_count
+                                    disp(['[DEBUG] File: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
+                                    disp(['[DEBUG] Nodal measure: ', local_nod_name{idx_meas}]);
+                                    disp(['[DEBUG] temp_net size: ', mat2str(size(temp_net))]);
                                     temp_prop=app.gatn_measure.nod_func{meas_nod_list(idx_meas)}(temp_net);
+                                    disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
+                                    disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
+                                    disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
                                     network_data_mat_nodal(idx_frame,idx_meas,idx_thr,:)=temp_prop(nodal_idx);
                                 end
                             end

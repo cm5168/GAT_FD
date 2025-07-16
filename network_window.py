@@ -299,12 +299,25 @@ class NetworkWindow(QWidget):
             if subj_data is None:
                 continue
             d_corr = subj_data.d_corr
+            print(f"[DEBUG] d_corr shape: {d_corr.shape}")
             # For each threshold
             for idx_thres, thres in enumerate(dnet_data_threshold_list):
                 # For each window
                 for idx_win in range(data_window_size):
                     temp_net = d_corr[idx_win]
+                    print(f"[DEBUG] temp_net original shape: {temp_net.shape}")
                     temp_net = np.nan_to_num(temp_net, nan=0.0)
+                    # Fix: reshape temp_net to 2D if it's 1D
+                    if temp_net.ndim == 1:
+                        n = int(np.sqrt(temp_net.shape[0]))
+                        if n * n == temp_net.shape[0]:
+                            temp_net = temp_net.reshape((n, n))
+                            print(f"[DEBUG] Reshaped temp_net from 1D to 2D: {temp_net.shape}")
+                        else:
+                            print(f"[WARNING] Cannot reshape temp_net: shape {temp_net.shape} is not a perfect square. Skipping measure calculation for this window.")
+                            continue
+                    else:
+                        print(f"[DEBUG] temp_net is already 2D: {temp_net.shape}")
                     # Absolute thresholding
                     if threshold_absolute == 1:
                         temp_net = np.abs(temp_net)
@@ -330,27 +343,39 @@ class NetworkWindow(QWidget):
                     # Nodal measures
                     if run_if_nod:
                         for i, measure_idx in enumerate(meas_nod_list):
+                            print(f"\n[DEBUG] File: {file_name}, Window: {idx_win}, Threshold: {thres}")
+                            print(f"[DEBUG] Nodal measure: {self.gatn_measure['nod_name'][measure_idx]}")
+                            print(f"[DEBUG] temp_net shape: {temp_net.shape}")
+                            # print(f"[DEBUG] temp_net (binarized):\n{temp_net}")
+                            # print(f"[DEBUG] Selected nodes: {self.gatn_setting['node_list_selected']}")
                             func = self.gatn_measure['nod_func'][measure_idx]
                             try:
                                 vals = func(temp_net)
+                                print(f"[DEBUG] Raw nodal measure output: {vals}")
                                 node_indices = [node_list.index(n) for n in self.gatn_setting['node_list_selected']]
+                                print(f"[DEBUG] Node indices: {node_indices}")
                                 vals_selected = np.array(vals)[node_indices]
-                            except Exception:
+                                print(f"[DEBUG] Selected node values: {vals_selected}")
+                            except Exception as e:
+                                print(f"[DEBUG] Exception in nodal measure calculation: {e}")
                                 vals_selected = np.full(len(self.gatn_setting['node_list_selected']), np.nan)
                             dnet_data_data_mat_nodal[idx_win, i, idx_thres, :, idx_file] = vals_selected
             progress.setValue(idx_file + 1)
 
         # Save output
         out_mat_path = out_file + '.mat'
-        sio.savemat(out_mat_path, {
+        mat_dict = {
             'dnet_data_threshold_list': dnet_data_threshold_list,
             'dnet_data_nodes_list': dnet_data_nodes_list,
             'dnet_data_measures_glob': dnet_data_measures_glob,
             'dnet_data_measures_nod': dnet_data_measures_nod,
             'dnet_data_files': dnet_data_files,
-            'dnet_data_data_mat_global': dnet_data_data_mat_global if run_if_glob else None,
-            'dnet_data_data_mat_nodal': dnet_data_data_mat_nodal if run_if_nod else None
-        }, do_compression=True)
+        }
+        if run_if_glob:
+            mat_dict['dnet_data_data_mat_global'] = dnet_data_data_mat_global
+        if run_if_nod:
+            mat_dict['dnet_data_data_mat_nodal'] = dnet_data_data_mat_nodal
+        sio.savemat(out_mat_path, mat_dict, do_compression=True)
 
         # Optionally save CSV if condition is loaded
         if self.gatn_setting['iscondition'] == 1:
