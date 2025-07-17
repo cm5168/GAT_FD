@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt
 from scipy.io import loadmat
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from joblib import Parallel, delayed
 import sys
 import numpy as np
 import os
@@ -43,94 +44,92 @@ def choose_node(node_list, parent=None):
         return selected_nodes
     else:
         return []
+def calc_global_efficiency(temp_net):
+    return bct.efficiency_bin(temp_net, 0)
+
+def calc_network_local_efficiency(temp_net):
+    return float(np.mean(bct.efficiency_bin(temp_net, 1)))
+
+def calc_network_clustering_coefficient(temp_net):
+    return float(np.mean(bct.clustering_coef_bu(temp_net)))
+
+def calc_network_average_degree(temp_net):
+    return float(np.mean(bct.degrees_und(temp_net)))
+
+def calc_network_characteristic_path(temp_net):
+    D = bct.distance_bin(temp_net)
+    return bct.charpath(D, 0, 0)[0]
+
+def calc_sw_norm_cc(temp_net):
+    n_nodes = temp_net.shape[0]
+    n_edges = int(np.round(temp_net.sum() / 2))
+    rand_cc = 0
+    for _ in range(20):
+        r = bct.makerandCIJ_und(n_nodes, n_edges)
+        rand_cc += np.mean(bct.clustering_coef_bu(r))
+    rand_cc /= 20
+    return float(np.mean(bct.clustering_coef_bu(temp_net)) / rand_cc)
+
+def calc_sw_norm_pl(temp_net):
+    n_nodes = temp_net.shape[0]
+    n_edges = int(np.round(temp_net.sum() / 2))
+    rand_pl = 0
+    for _ in range(20):
+        r = bct.makerandCIJ_und(n_nodes, n_edges)
+        D = bct.distance_bin(r)
+        rand_pl += bct.charpath(D, 0, 0)[0]
+    rand_pl /= 20
+    D0 = bct.distance_bin(temp_net)
+    return float(bct.charpath(D0, 0, 0)[0] / rand_pl)
+
+def calc_sw_coefficient(temp_net):
+    n_nodes = temp_net.shape[0]
+    n_edges = int(np.round(temp_net.sum() / 2))
+    rand_cc = rand_pl = 0
+    for _ in range(20):
+        r = bct.makerandCIJ_und(n_nodes, n_edges)
+        rand_cc += np.mean(bct.clustering_coef_bu(r))
+        D = bct.distance_bin(r)
+        rand_pl += bct.charpath(D, 0, 0)[0]
+    rand_cc /= 20
+    rand_pl /= 20
+    num_cc = np.mean(bct.clustering_coef_bu(temp_net))
+    D0 = bct.distance_bin(temp_net)
+    num_pl = bct.charpath(D0, 0, 0)[0]
+    return float((num_cc / rand_cc) / (num_pl / rand_pl))
+
+def calc_modularity(temp_net):
+    _, mod = bct.modularity_und(temp_net)
+    return mod
+
+def calc_transitivity(temp_net):
+    return float(bct.transitivity_bu(temp_net))
+
+def calc_assortativity(temp_net):
+    return float(bct.assortativity_bin(temp_net, 0))
+
+def calc_nodal_efficiency(temp_net):
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return bct.efficiency_bin(A, 1)
+
+def calc_nodal_local_efficiency(temp_net):
+    return bct.efficiency_bin(temp_net, 1)
+
+def calc_nodal_clustering_coefficient(temp_net):
+    return bct.clustering_coef_bu(temp_net)
+
+def calc_nodal_degree(temp_net):
+    return bct.degrees_und(temp_net)
+
+def calc_nodal_betweenness(temp_net):
+    return bct.betweenness_bin(temp_net)
 class NetworkWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.createComponents()
         self.startupFcn()
-    #  Button pushed function: Button_loadfiles
-    def calc_global_efficiency(self, temp_net):
-        return bct.efficiency_bin(temp_net, 0)
-
-    def calc_network_local_efficiency(self, temp_net):
-        return float(np.mean(bct.efficiency_bin(temp_net, 1)))
-
-    def calc_network_clustering_coefficient(self, temp_net):
-        return float(np.mean(bct.clustering_coef_bu(temp_net)))
-
-    def calc_network_average_degree(self, temp_net):
-        return float(np.mean(bct.degrees_und(temp_net)))
-
-    def calc_network_characteristic_path(self, temp_net):
-        D = bct.distance_bin(temp_net)
-        return bct.charpath(D, 0, 0)[0]
-
-    def calc_sw_norm_cc(self, temp_net):
-        n_nodes = temp_net.shape[0]
-        n_edges = int(np.round(temp_net.sum() / 2))
-        rand_cc = 0
-        for _ in range(20):
-            r = bct.makerandCIJ_und(n_nodes, n_edges)
-            rand_cc += np.mean(bct.clustering_coef_bu(r))
-        rand_cc /= 20
-        return float(np.mean(bct.clustering_coef_bu(temp_net)) / rand_cc)
-
-    def calc_sw_norm_pl(self, temp_net):
-        n_nodes = temp_net.shape[0]
-        n_edges = int(np.round(temp_net.sum() / 2))
-        rand_pl = 0
-        for _ in range(20):
-            r = bct.makerandCIJ_und(n_nodes, n_edges)
-            D = bct.distance_bin(r)
-            rand_pl += bct.charpath(D, 0, 0)[0]
-        rand_pl /= 20
-        D0 = bct.distance_bin(temp_net)
-        return float(bct.charpath(D0, 0, 0)[0] / rand_pl)
-
-    def calc_sw_coefficient(self, temp_net):
-        n_nodes = temp_net.shape[0]
-        n_edges = int(np.round(temp_net.sum() / 2))
-        rand_cc = rand_pl = 0
-        for _ in range(20):
-            r = bct.makerandCIJ_und(n_nodes, n_edges)
-            rand_cc += np.mean(bct.clustering_coef_bu(r))
-            D = bct.distance_bin(r)
-            rand_pl += bct.charpath(D, 0, 0)[0]
-        rand_cc /= 20
-        rand_pl /= 20
-        num_cc = np.mean(bct.clustering_coef_bu(temp_net))
-        D0 = bct.distance_bin(temp_net)
-        num_pl = bct.charpath(D0, 0, 0)[0]
-        return float((num_cc / rand_cc) / (num_pl / rand_pl))
-
-    def calc_modularity(self, temp_net):
-        _, mod = bct.modularity_und(temp_net)
-        return mod
-
-    def calc_transitivity(self, temp_net):
-        return float(bct.transitivity_bu(temp_net))
-
-    def calc_assortativity(self, temp_net):
-        return float(bct.assortativity_bin(temp_net, 0))
-
-    def calc_nodal_efficiency(self, temp_net):
-        A = temp_net.copy()
-        np.fill_diagonal(A, 0)
-        A = (A != 0).astype(float)
-        # use bctpy efficiency for local
-        return bct.efficiency_bin(A, 1)
-
-    def calc_nodal_local_efficiency(self, temp_net):
-        return bct.efficiency_bin(temp_net, 1)
-
-    def calc_nodal_clustering_coefficient(self, temp_net):
-        return bct.clustering_coef_bu(temp_net)
-
-    def calc_nodal_degree(self, temp_net):
-        return bct.degrees_und(temp_net)
-
-    def calc_nodal_betweenness(self, temp_net):
-        return bct.betweenness_bin(temp_net)
     def gatn_loadfile(self):
         # Open file dialog with multi-selection enabled
         files, _ = QFileDialog.getOpenFileNames(self, "Select One or More Files", "", "MAT files (*.mat)")
@@ -290,78 +289,100 @@ class NetworkWindow(QWidget):
         progress.show()
     
         # Main calculation loop
+        glob_funcs = [calc_global_efficiency, calc_network_local_efficiency, calc_network_clustering_coefficient, calc_network_average_degree, calc_network_characteristic_path, calc_sw_coefficient, calc_sw_norm_cc, calc_sw_norm_pl, calc_transitivity, calc_assortativity, calc_modularity]
+        nodal_funcs = [calc_nodal_efficiency, calc_nodal_local_efficiency, calc_nodal_clustering_coefficient, calc_nodal_degree, calc_nodal_betweenness]
+        # function to process a single window
+        def process_window(idx_win, d_corr, data_window_size, threshold_absolute, threshold_method, thres, node_list, run_if_glob, run_if_nod, meas_glob_list, meas_nod_list, node_list_selected):
+            temp_net = d_corr  # Fix: assign temp_net from d_corr
+            print('d_corr:', d_corr.shape, 'idx_win:', idx_win)
+            # Fix: assign d_corr to temp_net
+            temp_net = np.nan_to_num(temp_net, nan=0.0)
+            # Fix: reshape temp_net to 2D if it's 1D
+            print('temp_net before reshape:', temp_net.shape)
+            print
+            if temp_net.ndim == 1:
+                n = int(np.sqrt(temp_net.shape[0]))
+                if n * n == temp_net.shape[0]:
+                    temp_net = temp_net.reshape((n, n))
+                else:
+                    return None, None  # skip
+            # Absolute thresholding
+            if threshold_absolute == 1:
+                temp_net = np.abs(temp_net)
+            # Thresholding methods
+            # print('temp_net before thresholding:', temp_net)
+            if threshold_method == 2:  # Cost (percentile)
+                temp_net_thresh = np.percentile(temp_net, (1-thres)*100)
+            elif threshold_method == 1:  # Proportional
+                temp_net_thresh = np.max(temp_net) * thres
+            else:  # Absolute
+                temp_net_thresh = thres
+            temp_net = np.where(temp_net >= temp_net_thresh, temp_net, 0)
+            # Binarization
+            temp_net[temp_net != 0] = 1
+            # Global measures
+            glob_vals = None
+            nodal_vals = None
+            if run_if_glob:
+                glob_vals = []
+                for i, measure_idx in enumerate(meas_glob_list):
+                    func = glob_funcs[measure_idx]
+                    try:
+                        val = func(temp_net)
+                    except Exception:
+                        val = np.nan
+                    glob_vals.append(val)
+            if run_if_nod:
+                nodal_vals = []
+                for i, measure_idx in enumerate(meas_nod_list):
+                    func = nodal_funcs[measure_idx]
+                    try:
+                        vals = func(temp_net)
+                        node_indices = [node_list.index(n) for n in node_list_selected]
+                        vals_selected = np.array(vals)[node_indices]
+                    except Exception:
+                        vals_selected = np.full(len(node_list_selected), np.nan)
+                    nodal_vals.append(vals_selected)
+            return glob_vals, nodal_vals
+
         for idx_file, file_name in enumerate(self.gatn_setting['file_list']):
             if progress.wasCanceled():
                 break
+            print(f'[DEBUG] Start file loop: idx_file={idx_file+1}')
             file_path = os.path.join(self.gatn_setting['file_path_list'], file_name)
+            print(f'[DEBUG] Loading file: {file_name}')
             temp_feature = loadmat(file_path, squeeze_me=True, struct_as_record=False)
             subj_data = temp_feature.get('subj_data', None)
             if subj_data is None:
+                print('[DEBUG] subj_data not found, skipping file')
                 continue
             d_corr = subj_data.d_corr
-            print(f"[DEBUG] d_corr shape: {d_corr.shape}")
-            # For each threshold
+            print(f'[DEBUG] d_corr shape: {d_corr.shape}')
+            if run_if_glob:
+                print('[DEBUG] Initializing global data matrix')
+            if run_if_nod:
+                print('[DEBUG] Initializing nodal data matrix')
             for idx_thres, thres in enumerate(dnet_data_threshold_list):
-                # For each window
-                for idx_win in range(data_window_size):
-                    temp_net = d_corr[idx_win]
-                    print(f"[DEBUG] temp_net original shape: {temp_net.shape}")
-                    temp_net = np.nan_to_num(temp_net, nan=0.0)
-                    # Fix: reshape temp_net to 2D if it's 1D
-                    if temp_net.ndim == 1:
-                        n = int(np.sqrt(temp_net.shape[0]))
-                        if n * n == temp_net.shape[0]:
-                            temp_net = temp_net.reshape((n, n))
-                            print(f"[DEBUG] Reshaped temp_net from 1D to 2D: {temp_net.shape}")
-                        else:
-                            print(f"[WARNING] Cannot reshape temp_net: shape {temp_net.shape} is not a perfect square. Skipping measure calculation for this window.")
-                            continue
-                    else:
-                        print(f"[DEBUG] temp_net is already 2D: {temp_net.shape}")
-                    # Absolute thresholding
-                    if threshold_absolute == 1:
-                        temp_net = np.abs(temp_net)
-                    # Thresholding methods
-                    if threshold_method == 2:  # Cost (percentile)
-                        temp_net_thresh = np.percentile(temp_net, (1-thres)*100)
-                    elif threshold_method == 1:  # Proportional
-                        temp_net_thresh = np.max(temp_net) * thres
-                    else:  # Absolute
-                        temp_net_thresh = thres
-                    temp_net = np.where(temp_net >= temp_net_thresh, temp_net, 0)
-                    # Binarization
-                    temp_net[temp_net != 0] = 1
-                    # Global measures
-                    if run_if_glob:
-                        for i, measure_idx in enumerate(meas_glob_list):
-                            func = self.gatn_measure['glob_func'][measure_idx]
-                            try:
-                                val = func(temp_net)
-                            except Exception:
-                                val = np.nan
+                if d_corr.ndim == 2:
+                    # Only one frame, pass whole matrix
+                    results = [process_window(0, d_corr, data_window_size, threshold_absolute, threshold_method, thres, node_list, run_if_glob, run_if_nod, meas_glob_list, meas_nod_list, self.gatn_setting['node_list_selected'])]
+                else:
+                    # Multiple frames, pass each frame
+                    results = Parallel(n_jobs=-1)(delayed(process_window)(idx_win, d_corr[idx_win], data_window_size, threshold_absolute, threshold_method, thres, node_list, run_if_glob, run_if_nod, meas_glob_list, meas_nod_list, self.gatn_setting['node_list_selected']) for idx_win in range(data_window_size))
+                print(results)
+                for idx_win, (glob_vals, nodal_vals) in enumerate(results):
+                    if glob_vals is not None and run_if_glob:
+                        print('[DEBUG] Calculating global measures')
+                        print('[DEBUG] Assigning global measures')
+                        for i, val in enumerate(glob_vals):
                             dnet_data_data_mat_global[idx_win, i, idx_thres, idx_file] = val
-                    # Nodal measures
-                    if run_if_nod:
-                        for i, measure_idx in enumerate(meas_nod_list):
-                            print(f"\n[DEBUG] File: {file_name}, Window: {idx_win}, Threshold: {thres}")
-                            print(f"[DEBUG] Nodal measure: {self.gatn_measure['nod_name'][measure_idx]}")
-                            print(f"[DEBUG] temp_net shape: {temp_net.shape}")
-                            # print(f"[DEBUG] temp_net (binarized):\n{temp_net}")
-                            # print(f"[DEBUG] Selected nodes: {self.gatn_setting['node_list_selected']}")
-                            func = self.gatn_measure['nod_func'][measure_idx]
-                            try:
-                                vals = func(temp_net)
-                                print(f"[DEBUG] Raw nodal measure output: {vals}")
-                                node_indices = [node_list.index(n) for n in self.gatn_setting['node_list_selected']]
-                                print(f"[DEBUG] Node indices: {node_indices}")
-                                vals_selected = np.array(vals)[node_indices]
-                                print(f"[DEBUG] Selected node values: {vals_selected}")
-                            except Exception as e:
-                                print(f"[DEBUG] Exception in nodal measure calculation: {e}")
-                                vals_selected = np.full(len(self.gatn_setting['node_list_selected']), np.nan)
+                    if nodal_vals is not None and run_if_nod:
+                        # print('[DEBUG] Calculating nodal measures')
+                        # print('[DEBUG] Assigning nodal measures')
+                        for i, vals_selected in enumerate(nodal_vals):
                             dnet_data_data_mat_nodal[idx_win, i, idx_thres, :, idx_file] = vals_selected
-            progress.setValue(idx_file + 1)
-
+                print('[DEBUG] End of threshold loop')
+            print('[DEBUG] End of file loop')
         # Save output
         out_mat_path = out_file + '.mat'
         mat_dict = {
@@ -418,17 +439,17 @@ class NetworkWindow(QWidget):
         self.gatn_measure['glob_count'] = len(self.gatn_measure['glob_name'])
         self.gatn_measure['glob_measure'] = [0] * self.gatn_measure['glob_count']
         self.gatn_measure['glob_func'] = [
-            self.calc_global_efficiency,
-            self.calc_network_local_efficiency,
-            self.calc_network_clustering_coefficient,
-            self.calc_network_average_degree,
-            self.calc_network_characteristic_path,
-            self.calc_sw_coefficient,
-            self.calc_sw_norm_cc,
-            self.calc_sw_norm_pl,
-            self.calc_transitivity,
-            self.calc_assortativity,
-            self.calc_modularity
+            calc_global_efficiency,
+            calc_network_local_efficiency,
+            calc_network_clustering_coefficient,
+            calc_network_average_degree,
+            calc_network_characteristic_path,
+            calc_sw_coefficient,
+            calc_sw_norm_cc,
+            calc_sw_norm_pl,
+            calc_transitivity,
+            calc_assortativity,
+            calc_modularity
         ]
         # Nodal
         self.gatn_measure['nod_name'] = [ 'nodal_efficiency', 'nodal_local_efficiency',  'nodal_clustering_coefficient', 'nodal_degree', 'nodal_betweenness' ]
@@ -436,11 +457,11 @@ class NetworkWindow(QWidget):
         self.gatn_measure['nod_count'] = len(self.gatn_measure['nod_name'])
         self.gatn_measure['nod_measure'] = [0] * self.gatn_measure['nod_count']
         self.gatn_measure['nod_func'] = [
-            self.calc_nodal_efficiency,
-            self.calc_nodal_local_efficiency,
-            self.calc_nodal_clustering_coefficient,
-            self.calc_nodal_degree,
-            self.calc_nodal_betweenness
+            calc_nodal_efficiency,
+            calc_nodal_local_efficiency,
+            calc_nodal_clustering_coefficient,
+            calc_nodal_degree,
+            calc_nodal_betweenness
         ]
 
     #    Button pushed function: SelectNodesButton

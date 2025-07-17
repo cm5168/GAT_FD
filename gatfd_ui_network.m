@@ -565,7 +565,7 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                        
                         for idx_frame=1:data_window_size
                             % Thresholding
-                            temp_net=squeeze(temp_subj_data.d_corr(idx_frame,:,:));
+                            temp_net=squeeze(temp_subj_data.d_corr(idx_frame,:,:)); %the problem is here
                             temp_net(isnan(temp_net))=0;
                             
                             %% Absolutecnn
@@ -573,6 +573,8 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                                 temp_net=abs(temp_net);
                             end
                             %% Methods
+                            disp(['[DEBUG] Processing file: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
+                            %disp(['[DEBUG] temp_net (before thresholding):']); disp(temp_net);
                             if app.gatn_setting.threshold_method==3
                                 temp_net_thresh=prctile(temp_net(:),(1-dnet_data_threshold_list(idx_thr))*100);
                             elseif  app.gatn_setting.threshold_method==2
@@ -598,9 +600,9 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                                     disp(['[DEBUG] Nodal measure: ', local_nod_name{idx_meas}]);
                                     disp(['[DEBUG] temp_net size: ', mat2str(size(temp_net))]);
                                     temp_prop=app.gatn_measure.nod_func{meas_nod_list(idx_meas)}(temp_net);
-                                    disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
-                                    disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
-                                    disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
+                                    %disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
+                                    % disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
+                                    %disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
                                     network_data_mat_nodal(idx_frame,idx_meas,idx_thr,:)=temp_prop(nodal_idx);
                                 end
                             end
