@@ -12,6 +12,7 @@ import os
 import bct  # bctpy package for Brain Connectivity Toolbox functions
 import scipy.io as sio
 import pandas as pd
+from library.efficiency_bin import efficiency_bin
 def choose_node(node_list, parent=None):
     dialog = QDialog(parent)
     dialog.setWindowTitle("Select nodes for calculation")
@@ -45,10 +46,10 @@ def choose_node(node_list, parent=None):
     else:
         return []
 def calc_global_efficiency(temp_net):
-    return bct.efficiency_bin(temp_net, 0)
+    return efficiency_bin(temp_net, local=False)
 
 def calc_network_local_efficiency(temp_net):
-    return float(np.mean(bct.efficiency_bin(temp_net, 1)))
+    return float(np.mean(efficiency_bin(temp_net, local=True)))
 
 def calc_network_clustering_coefficient(temp_net):
     return float(np.mean(bct.clustering_coef_bu(temp_net)))
@@ -109,16 +110,35 @@ def calc_assortativity(temp_net):
     return float(bct.assortativity_bin(temp_net, 0))
 
 def calc_nodal_efficiency(temp_net):
+    n = temp_net.shape[0]
+    A = np.array(temp_net, dtype=float)
+    np.fill_diagonal(A, 0)  # clear diagonal
+    A = (A != 0).astype(float)  # enforce double precision
+    l = 1
+    Lpath = A.copy()
+    D = A.copy()
+    n_ = n
+    Idx = (Lpath != 0) & (D == 0)
+    while np.any(Idx):
+        l += 1
+        Lpath = Lpath @ A
+        Idx = (Lpath != 0) & (D == 0)
+        D[Idx] = l
+    D[(D == 0) | np.eye(n_, dtype=bool)] = np.inf  # assign inf to disconnected and diagonal
+    D = 1.0 / D  # invert distance
+    return np.sum(D, axis=0) / n
+
+def calc_nodal_local_efficiency(temp_net):
     A = temp_net.copy()
     np.fill_diagonal(A, 0)
     A = (A != 0).astype(float)
     return bct.efficiency_bin(A, 1)
 
-def calc_nodal_local_efficiency(temp_net):
-    return bct.efficiency_bin(temp_net, 1)
-
 def calc_nodal_clustering_coefficient(temp_net):
-    return bct.clustering_coef_bu(temp_net)
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return bct.clustering_coef_bu(A)
 
 def calc_nodal_degree(temp_net):
     return bct.degrees_und(temp_net)
@@ -150,6 +170,9 @@ class NetworkWindow(QWidget):
         first_file = file_paths[0]
         temp_feature = loadmat(first_file, squeeze_me=True, struct_as_record=False)
         subj_data = temp_feature.get('subj_data', None)
+        d_corr = getattr(subj_data, 'd_corr', None)
+        # print("d_corr.ndim =", d_corr.ndim, "shape =", d_corr.shape)
+        # print("d_corr =", d_corr[0][:])
         node_list = []
         d_atlas_list = subj_data.d_atlas_list
         node_list = d_atlas_list.tolist()
@@ -293,13 +316,11 @@ class NetworkWindow(QWidget):
         nodal_funcs = [calc_nodal_efficiency, calc_nodal_local_efficiency, calc_nodal_clustering_coefficient, calc_nodal_degree, calc_nodal_betweenness]
         # function to process a single window
         def process_window(idx_win, d_corr, data_window_size, threshold_absolute, threshold_method, thres, node_list, run_if_glob, run_if_nod, meas_glob_list, meas_nod_list, node_list_selected):
-            temp_net = d_corr  # Fix: assign temp_net from d_corr
-            print('d_corr:', d_corr.shape, 'idx_win:', idx_win)
-            # Fix: assign d_corr to temp_net
+            # print('d_corr:', d_corr.shape, 'idx_win:', idx_win)
+            temp_net = d_corr  # Fix: assign d_corr to temp_net
             temp_net = np.nan_to_num(temp_net, nan=0.0)
             # Fix: reshape temp_net to 2D if it's 1D
-            print('temp_net before reshape:', temp_net.shape)
-            print
+            # print('temp_net before reshape:', temp_net.shape)
             if temp_net.ndim == 1:
                 n = int(np.sqrt(temp_net.shape[0]))
                 if n * n == temp_net.shape[0]:
@@ -348,11 +369,9 @@ class NetworkWindow(QWidget):
         for idx_file, file_name in enumerate(self.gatn_setting['file_list']):
             if progress.wasCanceled():
                 break
-            print(f'[DEBUG] Start file loop: idx_file={idx_file+1}')
             file_path = os.path.join(self.gatn_setting['file_path_list'], file_name)
             print(f'[DEBUG] Loading file: {file_name}')
             temp_feature = loadmat(file_path, squeeze_me=True, struct_as_record=False)
-            subj_data = temp_feature.get('subj_data', None)
             if subj_data is None:
                 print('[DEBUG] subj_data not found, skipping file')
                 continue
@@ -369,7 +388,7 @@ class NetworkWindow(QWidget):
                 else:
                     # Multiple frames, pass each frame
                     results = Parallel(n_jobs=-1)(delayed(process_window)(idx_win, d_corr[idx_win], data_window_size, threshold_absolute, threshold_method, thres, node_list, run_if_glob, run_if_nod, meas_glob_list, meas_nod_list, self.gatn_setting['node_list_selected']) for idx_win in range(data_window_size))
-                print(results)
+                # print("results:", results)
                 for idx_win, (glob_vals, nodal_vals) in enumerate(results):
                     if glob_vals is not None and run_if_glob:
                         print('[DEBUG] Calculating global measures')
@@ -381,7 +400,7 @@ class NetworkWindow(QWidget):
                         # print('[DEBUG] Assigning nodal measures')
                         for i, vals_selected in enumerate(nodal_vals):
                             dnet_data_data_mat_nodal[idx_win, i, idx_thres, :, idx_file] = vals_selected
-                print('[DEBUG] End of threshold loop')
+                # print('[DEBUG] End of threshold loop')
             print('[DEBUG] End of file loop')
         # Save output
         out_mat_path = out_file + '.mat'

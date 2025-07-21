@@ -1,81 +1,65 @@
 import numpy as np
 
-def distance_inv(A):
-    """
-    Compute the inverse‑distance matrix D for binary adjacency A,
-    following the MATLAB distance_inv subfunction.
-    """
-    n = A.shape[0]
-    Lpath = A.copy().astype(int)     # paths of length l
-    D = A.copy().astype(int)         # distance matrix
-    l = 1
-
-    # grow paths until no new connections appear
-    while True:
-        l += 1
-        Lpath = Lpath @ A
-        # new shortest paths of length l where D==0
-        idx = (Lpath != 0) & (D == 0)
-        if not idx.any():
-            break
-        D[idx] = l
-
-    # assign inf to disconnected pairs and diagonal
-    # note: np.eye gives floats, so cast mask
-    mask_diag = np.eye(n, dtype=bool)
-    D[(D == 0) | mask_diag] = np.inf
-
-    return 1.0 / D  # invert
-
 def efficiency_bin(A, local=False):
     """
-    Global or local efficiency of binary undirected network A.
+    EFFICIENCY_BIN     Global efficiency, local efficiency.
 
-    Parameters
-    ----------
-    A : (n,n) array_like
-        Binary adjacency matrix (0/1), directed or undirected.
-    local : bool, optional
-        If False (default), compute global efficiency (scalar).
-        If True, compute local efficiency (n‑vector).
+    Eglob = efficiency_bin(A)
+    Eloc = efficiency_bin(A, local=True)
 
-    Returns
-    -------
-    E : float or ndarray
-        Global efficiency (float) if local=False, otherwise local efficiency
-        as a length‑n numpy array.
+    The global efficiency is the average of inverse shortest path length,
+    and is inversely related to the characteristic path length.
+
+    The local efficiency is the global efficiency computed on the
+    neighborhood of the node, and is related to the clustering coefficient.
+
+    Inputs:     A,              binary undirected or directed connection matrix
+                local,          optional argument
+                                    local=0 computes global efficiency (default)
+                                    local=1 computes local efficiency
+
+    Output:     Eglob,          global efficiency (scalar)
+                Eloc,           local efficiency (vector)
     """
-    A = np.array(A, copy=True)
-    n = A.shape[0]
-
-    # clear self‑loops & binarize
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(int)
+    n = len(A)
+    A = np.array(A, dtype=float)
+    np.fill_diagonal(A, 0)  # clear diagonal
+    A = (A != 0).astype(float)  # enforce double precision/binary
 
     if local:
-        E = np.zeros(n, dtype=float)
+        E = np.zeros(n)
         for u in range(n):
-            # neighbors including outgoing or incoming
-            neighbors = np.where((A[u, :] == 1) | (A[:, u] == 1))[0]
-            if len(neighbors) < 2:
+            V = np.where((A[u, :] != 0) | (A[:, u] != 0))[0]  # neighbors
+            if V.size == 0:
                 continue
-
-            # build the induced subgraph
-            subA = A[np.ix_(neighbors, neighbors)]
-            # symmetrized adjacency vector for denominator
-            sa = A[u, neighbors] + A[neighbors, u]
-            # inverse‑distance matrix on subgraph
-            e = distance_inv(subA)
-            se = e + e.T
-
-            numer = 0.5 * np.sum((sa[:, None] * sa[None, :]) * se)
-            denom = sa.sum()**2 - np.sum(sa**2)
-
-            if denom > 0:
-                E[u] = numer / denom
+            sa = A[u, V] + A[V, u]  # symmetrized adjacency vector
+            e = distance_inv(A[np.ix_(V, V)])  # inverse distance matrix
+            se = e + e.T  # symmetrized inverse distance matrix
+            numer = np.sum((sa[:, None] @ sa[None, :]) * se) / 2  # numerator
+            if numer != 0:
+                denom = np.sum(sa) ** 2 - np.sum(sa ** 2)  # denominator
+                if denom != 0:
+                    E[u] = numer / denom  # local efficiency
         return E
-
     else:
         e = distance_inv(A)
-        # sum over all pairs, normalize by n*(n-1)
-        return np.nansum(e) / (n**2 - n)
+        return np.sum(e) / (n ** 2 - n)
+
+
+def distance_inv(A_):
+    l = 1
+    A_ = np.array(A_, dtype=float)
+    n_ = len(A_)
+    Lpath = A_.copy()
+    D = A_.copy()
+
+    Idx = (Lpath != 0) & (D == 0)
+    while np.any(Idx):
+        l += 1
+        Lpath = Lpath @ A_
+        Idx = (Lpath != 0) & (D == 0)
+        D[Idx] = l
+
+    D[(D == 0) | np.eye(n_, dtype=bool)] = np.inf  # assign inf to disconnected and diagonal
+    D = 1.0 / D  # invert distance
+    return D
