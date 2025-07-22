@@ -181,8 +181,6 @@ classdef gatfd_ui_network < matlab.apps.AppBase
             Lpath=temp_net;     %matrix of paths l
             D=temp_net;     %distance matrix
             n_=length(temp_net);
-            disp(['[DEBUG] Nodal efficiency calculation for ', num2str(n_), ' nodes']);
-            
             Idx=true;
             while any(Idx(:))
                 l=l+1;
@@ -300,7 +298,8 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                 app.TextArea_LoadedFiles.Value = app.gatn_setting.file_list;
                 temp_file_path=fullfile(fnc_temp_path,app.gatn_setting.file_list{1});
                 temp_feature=load(temp_file_path);
-                %disp("subj_data d_corr:"); disp(temp_feature.subj_data.d_corr(:,:,1));
+                %disp("subj_data d_corr:"); 
+                %disp(temp_feature.subj_data.d_corr(:,:,1));
                 if isfield(temp_feature.subj_data,'d_atlas_list')
                     app.gatn_setting.node_list=temp_feature.subj_data.d_atlas_list;
                 else
@@ -506,16 +505,16 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                             % Nodal
                             if run_if_nod
                                 for idx_meas=1:local_nod_count
-                                    disp(['[DEBUG] File: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
-                                    disp(['[DEBUG] Nodal measure: ', local_nod_name{idx_meas}]);
-                                    disp(['[DEBUG] temp_net size: ', mat2str(size(temp_net))]);
-                                    disp('[DEBUG] temp_net (binarized):');
+                                    %disp(['[DEBUG] File: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
+                                    %disp(['[DEBUG] Nodal measure: ', local_nod_name{idx_meas}]);
+                                    %disp(['[DEBUG] temp_net size: ', mat2str(size(temp_net))]);
+                                    %disp('[DEBUG] temp_net (binarized):');
                                     disp(temp_net);
                                     %disp(['[DEBUG] Selected nodes: ', strjoin(app.gatn_setting.node_list_selected, ', ')]);
                                     temp_prop=app.gatn_measure.nod_func{meas_nod_list(idx_meas)}(temp_net);
-                                    disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
-                                    disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
-                                    disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
+                                    %disp(['[DEBUG] Raw nodal measure output: ', mat2str(temp_prop)]);
+                                    %disp(['[DEBUG] Node indices: ', mat2str(nodal_idx)]);
+                                    %disp(['[DEBUG] Selected node values: ', mat2str(temp_prop(nodal_idx))]);
                                     network_data_mat_nodal_para(idx_frame,idx_meas,idx_thr,:)=temp_prop(nodal_idx);
                                 end
                             end
@@ -568,7 +567,7 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                         for idx_frame=1:data_window_size
                             % Thresholding
                             temp_net=squeeze(temp_subj_data.d_corr(idx_frame,:,:)); 
-                            %disp("temp_net"); disp(temp_net); %good so far
+                            %disp("temp_net"); %disp(temp_net);
                             temp_net(isnan(temp_net))=0;
                             
                             %% Absolutecnn
@@ -577,7 +576,7 @@ classdef gatfd_ui_network < matlab.apps.AppBase
                             end
                             %% Methods
                             %disp(['[DEBUG] Processing file: ', app.gatn_setting.file_list{idx_file}, ', Window: ', num2str(idx_frame), ', Threshold: ', num2str(dnet_data_threshold_list(idx_thr))]);
-                            %disp(['[DEBUG] temp_net (before thresholding):']); disp(temp_net);
+                            %disp(['[DEBUG] temp_net (before thresholding):']); %disp(temp_net);
                             if app.gatn_setting.threshold_method==3
                                 temp_net_thresh=prctile(temp_net(:),(1-dnet_data_threshold_list(idx_thr))*100);
                             elseif  app.gatn_setting.threshold_method==2

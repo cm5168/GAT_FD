@@ -12,7 +12,7 @@ import os
 import bct  # bctpy package for Brain Connectivity Toolbox functions
 import scipy.io as sio
 import pandas as pd
-from library.efficiency_bin import efficiency_bin
+from library.degrees_und  import degrees_und as my_degree_und
 def choose_node(node_list, parent=None):
     dialog = QDialog(parent)
     dialog.setWindowTitle("Select nodes for calculation")
@@ -46,19 +46,34 @@ def choose_node(node_list, parent=None):
     else:
         return []
 def calc_global_efficiency(temp_net):
-    return efficiency_bin(temp_net, local=False)
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return bct.efficiency_bin(A, 0)
 
 def calc_network_local_efficiency(temp_net):
-    return float(np.mean(efficiency_bin(temp_net, local=True)))
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return float(np.mean(bct.efficiency_bin(A, 1)))
 
 def calc_network_clustering_coefficient(temp_net):
-    return float(np.mean(bct.clustering_coef_bu(temp_net)))
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return float(np.mean(bct.clustering_coef_bu(A)))
 
 def calc_network_average_degree(temp_net):
-    return float(np.mean(bct.degrees_und(temp_net)))
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return float(np.mean(my_degree_und(A)))
 
 def calc_network_characteristic_path(temp_net):
-    D = bct.distance_bin(temp_net)
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    D = bct.distance_bin(A)
     return bct.charpath(D, 0, 0)[0]
 
 def calc_sw_norm_cc(temp_net):
@@ -110,23 +125,26 @@ def calc_assortativity(temp_net):
     return float(bct.assortativity_bin(temp_net, 0))
 
 def calc_nodal_efficiency(temp_net):
+    temp_net = np.array(temp_net, dtype=float)
     n = temp_net.shape[0]
-    A = np.array(temp_net, dtype=float)
-    np.fill_diagonal(A, 0)  # clear diagonal
-    A = (A != 0).astype(float)  # enforce double precision
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
     l = 1
-    Lpath = A.copy()
-    D = A.copy()
-    n_ = n
-    Idx = (Lpath != 0) & (D == 0)
-    while np.any(Idx):
+    Lpath = temp_net.copy()
+    D = temp_net.copy()
+    n_ = len(temp_net)
+    while True:
         l += 1
-        Lpath = Lpath @ A
-        Idx = (Lpath != 0) & (D == 0)
-        D[Idx] = l
-    D[(D == 0) | np.eye(n_, dtype=bool)] = np.inf  # assign inf to disconnected and diagonal
-    D = 1.0 / D  # invert distance
-    return np.sum(D, axis=0) / n
+        Lpath = Lpath.dot(temp_net)
+        idx = (Lpath != 0) & (D == 0)
+        if not np.any(idx):
+            break
+        D[idx] = l
+
+    D[(D == 0) | np.eye(n_, dtype=bool)] = np.inf
+    D = 1.0 / D
+    results = np.sum(D, axis=0) / n
+    return results
 
 def calc_nodal_local_efficiency(temp_net):
     A = temp_net.copy()
@@ -141,7 +159,10 @@ def calc_nodal_clustering_coefficient(temp_net):
     return bct.clustering_coef_bu(A)
 
 def calc_nodal_degree(temp_net):
-    return bct.degrees_und(temp_net)
+    A = temp_net.copy()
+    np.fill_diagonal(A, 0)
+    A = (A != 0).astype(float)
+    return my_degree_und(A)
 
 def calc_nodal_betweenness(temp_net):
     return bct.betweenness_bin(temp_net)
@@ -391,8 +412,8 @@ class NetworkWindow(QWidget):
                 # print("results:", results)
                 for idx_win, (glob_vals, nodal_vals) in enumerate(results):
                     if glob_vals is not None and run_if_glob:
-                        print('[DEBUG] Calculating global measures')
-                        print('[DEBUG] Assigning global measures')
+                        # print('[DEBUG] Calculating global measures')
+                        # print('[DEBUG] Assigning global measures')
                         for i, val in enumerate(glob_vals):
                             dnet_data_data_mat_global[idx_win, i, idx_thres, idx_file] = val
                     if nodal_vals is not None and run_if_nod:
@@ -553,24 +574,24 @@ class NetworkWindow(QWidget):
         self.cb_local_eff = QCheckBox('Local Efficiency', self)
         self.cb_clustering = QCheckBox('Clustering Coefficient', self)
         self.cb_degree = QCheckBox('Degree', self)
+        self.cb_char_path = QCheckBox('Characteristic Path Length', self)
         self.cb_small_world = QCheckBox('Small World Coefficient', self)
         self.cb_modularity = QCheckBox('Modularity Coefficient', self)
         self.cb_norm_clustering = QCheckBox('Normalized Clustering Coefficient', self)
         self.cb_norm_path = QCheckBox('Normalized Path Length', self)
         self.cb_transitivity = QCheckBox('Transitivity Coefficient', self)
         self.cb_assortativity = QCheckBox('Assortativity Coefficient', self)
-        self.cb_char_path = QCheckBox('Characteristic Path Length', self)
         grid_global.addWidget(self.cb_global_eff, 0, 0)
         grid_global.addWidget(self.cb_local_eff, 1, 0)
         grid_global.addWidget(self.cb_clustering, 2, 0)
         grid_global.addWidget(self.cb_degree, 3, 0)
-        grid_global.addWidget(self.cb_small_world, 0, 1)
-        grid_global.addWidget(self.cb_modularity, 1, 1)
+        grid_global.addWidget(self.cb_small_world, 1, 1)
+        grid_global.addWidget(self.cb_modularity, 2, 2)
         grid_global.addWidget(self.cb_norm_clustering, 2, 1)
         grid_global.addWidget(self.cb_norm_path, 3, 1)
         grid_global.addWidget(self.cb_transitivity, 0, 2)
         grid_global.addWidget(self.cb_assortativity, 1, 2)
-        grid_global.addWidget(self.cb_char_path, 2, 2)
+        grid_global.addWidget(self.cb_char_path, 0, 1)
         self.group_global.setLayout(grid_global)
         layout.addWidget(self.group_global, 6, 0, 1, 2)
 

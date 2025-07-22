@@ -13,7 +13,7 @@ import os
 import numpy as np
 # from nilearn.glm.first_level import spm_hrf
 from PyQt6.QtWidgets import QMessageBox
-from spm_hrf import spm_hrf as my_spm_hrf
+from library.spm_hrf import spm_hrf as my_spm_hrf
 class DesignWindow(QWidget):
     def __init__(self):
         super().__init__()
