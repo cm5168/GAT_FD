@@ -12,7 +12,10 @@ import os
 import bct  # bctpy package for Brain Connectivity Toolbox functions
 import scipy.io as sio
 import pandas as pd
-from library.degrees_und  import degrees_und as my_degree_und
+from library.degrees_und  import degrees_und 
+from library.makerandCIJ_und import makerandCIJ_und 
+from library.modularity_und import modularity_und
+from library.charpath import charpath
 def choose_node(node_list, parent=None):
     dialog = QDialog(parent)
     dialog.setWindowTitle("Select nodes for calculation")
@@ -46,59 +49,64 @@ def choose_node(node_list, parent=None):
     else:
         return []
 def calc_global_efficiency(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return bct.efficiency_bin(A, 0)
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return bct.efficiency_bin(temp_net, 0)
 
 def calc_network_local_efficiency(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return float(np.mean(bct.efficiency_bin(A, 1)))
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return float(np.mean(bct.efficiency_bin(temp_net, 1)))
 
 def calc_network_clustering_coefficient(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return float(np.mean(bct.clustering_coef_bu(A)))
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return float(np.mean(bct.clustering_coef_bu(temp_net)))
 
 def calc_network_average_degree(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return float(np.mean(my_degree_und(A)))
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return float(np.mean(degrees_und(temp_net)))
 
 def calc_network_characteristic_path(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    D = bct.distance_bin(A)
-    return bct.charpath(D, 0, 0)[0]
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    D = bct.distance_bin(temp_net)
+    return charpath(D, 0, 0)[0]
 
 def calc_sw_norm_cc(temp_net):
-    n_nodes = temp_net.shape[0]
-    n_edges = int(np.round(temp_net.sum() / 2))
-    rand_cc = 0
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    num_edges = int(np.round(np.sum(temp_net) / 2))
+    num_nodes = temp_net.shape[0]
+    cc = np.mean(bct.clustering_coef_bu(temp_net))
+    cc_rand = 0
     for _ in range(20):
-        r = bct.makerandCIJ_und(n_nodes, n_edges)
-        rand_cc += np.mean(bct.clustering_coef_bu(r))
-    rand_cc /= 20
-    return float(np.mean(bct.clustering_coef_bu(temp_net)) / rand_cc)
+        temp_rand = makerandCIJ_und(num_nodes, num_edges)
+        cc_rand += np.mean(bct.clustering_coef_bu(temp_rand))
+        # print("cc_rand:", cc_rand)
+    cc_rand /= 20
+    return float(cc / cc_rand)
 
 def calc_sw_norm_pl(temp_net):
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
     n_nodes = temp_net.shape[0]
     n_edges = int(np.round(temp_net.sum() / 2))
     rand_pl = 0
     for _ in range(20):
         r = bct.makerandCIJ_und(n_nodes, n_edges)
         D = bct.distance_bin(r)
-        rand_pl += bct.charpath(D, 0, 0)[0]
+        print("rand_pl:", rand_pl)
+        print("D:", D)
+        rand_pl += charpath(D, 0, 0)[0]
     rand_pl /= 20
     D0 = bct.distance_bin(temp_net)
-    return float(bct.charpath(D0, 0, 0)[0] / rand_pl)
+    return float(charpath(D0, 0, 0)[0] / rand_pl)
 
 def calc_sw_coefficient(temp_net):
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
     n_nodes = temp_net.shape[0]
     n_edges = int(np.round(temp_net.sum() / 2))
     rand_cc = rand_pl = 0
@@ -106,22 +114,28 @@ def calc_sw_coefficient(temp_net):
         r = bct.makerandCIJ_und(n_nodes, n_edges)
         rand_cc += np.mean(bct.clustering_coef_bu(r))
         D = bct.distance_bin(r)
-        rand_pl += bct.charpath(D, 0, 0)[0]
+        rand_pl += charpath(D, 0, 0)[0]
     rand_cc /= 20
     rand_pl /= 20
     num_cc = np.mean(bct.clustering_coef_bu(temp_net))
     D0 = bct.distance_bin(temp_net)
-    num_pl = bct.charpath(D0, 0, 0)[0]
+    num_pl = charpath(D0, 0, 0)[0]
     return float((num_cc / rand_cc) / (num_pl / rand_pl))
 
 def calc_modularity(temp_net):
-    _, mod = bct.modularity_und(temp_net)
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    _, mod = modularity_und(temp_net)
     return mod
 
 def calc_transitivity(temp_net):
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
     return float(bct.transitivity_bu(temp_net))
 
 def calc_assortativity(temp_net):
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
     return float(bct.assortativity_bin(temp_net, 0))
 
 def calc_nodal_efficiency(temp_net):
@@ -147,22 +161,19 @@ def calc_nodal_efficiency(temp_net):
     return results
 
 def calc_nodal_local_efficiency(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return bct.efficiency_bin(A, 1)
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return bct.efficiency_bin(temp_net, 1)
 
 def calc_nodal_clustering_coefficient(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return bct.clustering_coef_bu(A)
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return bct.clustering_coef_bu(temp_net)
 
 def calc_nodal_degree(temp_net):
-    A = temp_net.copy()
-    np.fill_diagonal(A, 0)
-    A = (A != 0).astype(float)
-    return my_degree_und(A)
+    np.fill_diagonal(temp_net, 0)
+    temp_net = (temp_net != 0).astype(float)
+    return degrees_und(temp_net)
 
 def calc_nodal_betweenness(temp_net):
     return bct.betweenness_bin(temp_net)
