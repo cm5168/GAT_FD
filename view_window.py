@@ -119,14 +119,14 @@ class ViewWindow(QWidget    ):
         layout.addWidget(self.network_canvas, 0, 1)
 
         # FrameSlider and Label
-        self.frame_slider_label = QLabel("Frame")
-        layout.addWidget(self.frame_slider_label, 1, 0)
+        # self.frame_slider_label = QLabel("Frame")
+        # layout.addWidget(self.frame_slider_label, 0.25, 0)
 
         self.frame_slider = QSlider(Qt.Orientation.Horizontal)
         self.frame_slider.setMinimum(0)
         self.frame_slider.setMaximum(100)
-        # self.frame_slider.valueChanged.connect(self.gatv_update_network)
-        layout.addWidget(self.frame_slider, 1, 1)
+        self.frame_slider.valueChanged.connect(self.gatv_update_network)
+        layout.addWidget(self.frame_slider, 1, 0)
 
         self.frame_slider_cursor = QLabel("0")
         layout.addWidget(self.frame_slider_cursor, 1, 2)

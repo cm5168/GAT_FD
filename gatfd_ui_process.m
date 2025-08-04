@@ -480,6 +480,16 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                     disp('Atlas array shape:');
                     disp(size(fnc_pro_atlas_masks));
                     
+                    % Calculate and display physical dimensions
+                    func_phys_dims = size(fnc_rawdata) .* fnc_rawdata_info.PixelDimensions;
+                    disp('Func physical dimensions (mm):');
+                    disp(func_phys_dims(1:3));
+                    
+                    % Calculate expected output shape
+                    expected_output_shape = ceil(func_phys_dims(1:3) ./ fnc_pro_atlas_info.PixelDimensions);
+                    disp('Expected output shape (calculated):');
+                    disp(expected_output_shape);
+                    
                     % Transform data to atlas space
                     % Initial transform matrix
                     process_d.Value=(i-1)/fnc_pro_filelength;
@@ -499,22 +509,43 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                         %disp(fnc_rawdata_tt);
                         fnc_rawdata_tt_s=size(fnc_rawdata_tt);
                         
+                        disp('fnc_rawdata_t shape (resampled to expected grid):');
+                        disp(fnc_rawdata_tt_s);
+                        disp('atlas (target) shape:');
+                        disp(fnc_pro_atlas_size);
+                        disp('Expected vs actual shape match:');
+                        disp(isequal(expected_output_shape, fnc_rawdata_tt_s));
+                        
                         % Shift and trim data to match atlas
                         disp('Before shift/trim:');
                         disp(fnc_rawdata_tt_s);
                         disp(fnc_pro_atlas_size);
+                        
+                        % Display formatted shapes like Python
+                        disp('Atlas array shape:');
+                        fprintf('   %d   %d   %d\n', fnc_pro_atlas_size(1), fnc_pro_atlas_size(2), fnc_pro_atlas_size(3));
+                        disp(' ');
+                        disp('fnc_rawdata_t:');
+                        disp('fnc_rawdata_tt:');
+                        disp('Before shift/trim:');
+                        fprintf('   %d   %d   %d\n', fnc_rawdata_tt_s(1), fnc_rawdata_tt_s(2), fnc_rawdata_tt_s(3));
+                        disp(' ');
+                        fprintf('   %d   %d   %d\n', fnc_pro_atlas_size(1), fnc_pro_atlas_size(2), fnc_pro_atlas_size(3));
+                        disp(' ');
                         if fnc_rawdata_tt_s(1)>fnc_pro_atlas_size(1)
                             xshift=floor((fnc_rawdata_tt_s(1)-fnc_pro_atlas_size(1))/2);
                             axs=1;
                             axe=fnc_pro_atlas_size(1);
                             dxs=1+xshift;
                             dxe=fnc_pro_atlas_size(1)+xshift;
+                            disp(['X shift (data > atlas): xshift = ', num2str(xshift)]);
                         else
                             xshift=floor((fnc_pro_atlas_size(1)-fnc_rawdata_tt_s(1))/2);
                             axs=1+xshift;
                             axe=fnc_rawdata_tt_s(1)+xshift;
                             dxs=1;
                             dxe=fnc_rawdata_tt_s(1);
+                            disp(['X shift (atlas > data): xshift = ', num2str(xshift)]);
                         end
                             
                         % --- Y dimension shift/trim logic ---
@@ -565,27 +596,59 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                         disp(['dzs: ', num2str(dzs), ' to ', num2str(dze)]);
                         
                         % Apply to all frames
+                        disp('Processing all timepoints with imwarp...');
                         for ii=1:fnc_rawdata_len
                             fnc_rawdata_t=imwarp(fnc_rawdata(:,:,:,ii),fnc_rawdata_info.Transform);
                             fnc_rawdata_tt=imwarp(fnc_rawdata_t,fnc_pro_atlas_invtran);
                             fnc_data(axs:axe,ays:aye,azs:aze,ii)=fnc_rawdata_tt(dxs:dxe,dys:dye,dzs:dze);
                         end
+                        disp('Resampled func_data shape:');
+                        disp(size(fnc_data));
+                        disp('Final func_data shape:');
+                        disp(size(fnc_data));
                     end
 
                     % Calculate atlased data
                     process_d.Value=(i-0.8)/fnc_pro_filelength;
                     process_d.Message = {[num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas']};
+                    disp([num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas']);
+                    
+                    % Use the atlas which is already in the target space
+                    disp('Resampled atlas shape:');
+                    disp(size(fnc_pro_atlas_masks));
+                    
                     atlased_data=zeros(fnc_rawdata_len,atl_len,"double");
                     fnc_pro_atlas_masks_flat=fnc_pro_atlas_masks(:);
                     fnc_data_flat=reshape(fnc_data,fnc_pro_atlas_size(1)*fnc_pro_atlas_size(2)*fnc_pro_atlas_size(3),fnc_rawdata_len);
+                    
+                    disp(['Resampled atlas shape: ', num2str(size(fnc_pro_atlas_masks,1)), ' x ', num2str(size(fnc_pro_atlas_masks,2)), ' x ', num2str(size(fnc_pro_atlas_masks,3))]);
+                    disp(['Resampled func shape: ', num2str(size(fnc_data,1)), ' x ', num2str(size(fnc_data,2)), ' x ', num2str(size(fnc_data,3))]);
+                    
+                    disp(['fnc_pro_atlas_masks_flat shape: ', num2str(length(fnc_pro_atlas_masks_flat))]);
+                    disp(['fnc_data_flat shape: ', num2str(size(fnc_data_flat,1)), ' x ', num2str(size(fnc_data_flat,2))]);
+                    
                     for ii=1:atl_len
                         process_d.Value=(i-0.8+0.2*ii/atl_len)/fnc_pro_filelength;
                         process_d.Message = {[num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas ',num2str(ii),'/',num2str(atl_len)]};
+                        disp([num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas ',num2str(ii),'/',num2str(atl_len)]);
                         temp_pos=fnc_pro_atlas_masks_flat==ii;
+                        disp(['ROI ', num2str(ii), ': ', num2str(sum(temp_pos)), ' voxels']);
                         temp_value=fnc_data_flat(temp_pos,:);
+                        
+                        % Debug: Print first few values and their statistics
+                        if ii <= 3  % Only for first 3 ROIs to avoid too much output
+                            disp(['ROI ', num2str(ii), ' temp_value shape: ', num2str(size(temp_value,1)), ' x ', num2str(size(temp_value,2))]);
+                            if size(temp_value,1) > 0
+                                disp(['ROI ', num2str(ii), ' first 5 voxels, first timepoint: ', num2str(temp_value(1:min(5,size(temp_value,1)),1)')]);
+                                disp(['ROI ', num2str(ii), ' mean first timepoint: ', num2str(mean(temp_value(:,1),'omitnan'))]);
+                                disp(['ROI ', num2str(ii), ' std first timepoint: ', num2str(std(temp_value(:,1),'omitnan'))]);
+                            end
+                        end
+                        
                         %temp_value=temp_value(temp_value>0);    % Remove Zeros in calculating the mean.
                         atlased_data(:,ii)=mean(temp_value,'omitnan');
                     end
+                    disp(['Final atlased_data shape: ', num2str(size(atlased_data,1)), ' x ', num2str(size(atlased_data,2))]);
                     
                 elseif app.FileFormatDropDown.Value==2
                     temp_data=load(fnc_in_file);

@@ -2,6 +2,7 @@
 import os
 import numpy as np
 import nibabel as nib
+import pywt
 from scipy.ndimage import affine_transform
 from scipy.io import savemat, loadmat
 from scipy.signal import butter, filtfilt
@@ -476,11 +477,9 @@ class ProcessWindow(QWidget):
                 atlas_data = atlas_nib.get_fdata()
                 func_data = func_img.get_fdata()
                 # Print voxel size and orientation info for debug
-                print("Atlas voxel size:", atlas_nib.header.get_zooms()[:3])
                 print("Atlas affine:\n", atlas_nib.affine)
                 print("Atlas orientation:", nib.aff2axcodes(atlas_nib.affine))
                 print("Atlas array shape:", atlas_data.shape)
-                print("Func voxel size:", func_img.header.get_zooms()[:3])
                 print("Func affine:\n", func_img.affine)
                 print("Func orientation:", nib.aff2axcodes(func_img.affine))
                 print("Func array shape:", func_data.shape)
@@ -503,119 +502,189 @@ class ProcessWindow(QWidget):
                 func_data = func_data_las
                 atlas_data = atlas_data_las
                 func_shape = func_data_las.shape[:3]  # Define func_shape for output_shape
-                # --- Affine transform and cropping as before, but use reoriented data ---
+                # --- Use nibabel.processing.resample_from_to to match MATLAB imwarp OutputView ---
                 atlas_affine = atlas_nib.affine
                 func_affine = func_img.affine
-                # Compute transform to resample func to atlas space (like MATLAB imwarp)
-                affine_transform_mat = np.linalg.inv(atlas_affine) @ func_affine
-                # Resample the FIRST VOLUME ONLY without forcing output_shape (let it be as large as needed)
-                from scipy.ndimage import affine_transform
-                func_first_vol = func_data_las[..., 0]
-                # Estimate the shape of the resampled data (let scipy decide)
-                fnc_rawdata_t = affine_transform(
-                    func_first_vol,
-                    matrix=affine_transform_mat[:3, :3],
-                    offset=affine_transform_mat[:3, 3],
-                    order=1
-                )
-                print('fnc_rawdata_t shape (no forced output_shape):', fnc_rawdata_t.shape)
+                # --- Manual calculation of output shape based on voxel sizes ---
+                # Get voxel sizes
+                atlas_voxel_size = atlas_nib.header.get_zooms()[:3]
+                func_voxel_size = func_img.header.get_zooms()[:3]
+                print("Atlas voxel size:", atlas_voxel_size)
+                print("Func voxel size:", func_voxel_size)
+                
+                # Calculate physical dimensions of functional data
+                func_phys_dims = np.array(func_data_las.shape[:3]) * np.array(func_voxel_size)
+                print("Func physical dimensions (mm):", func_phys_dims)
+                
+                # Calculate expected output shape when resampling to atlas voxel size
+                expected_output_shape = tuple(int(np.ceil(dim / voxel)) for dim, voxel in zip(func_phys_dims, atlas_voxel_size))
+                print("Expected output shape (calculated):", expected_output_shape)
+                
+                # --- Use nibabel.processing.resample_from_to to match MATLAB imwarp OutputView ---
+                from nibabel.processing import resample_from_to
+                func_first_vol_img = nib.Nifti1Image(func_data_las[..., 0], func_img.affine)
+                
+                # Create a reference image with the expected output shape and atlas voxel size
+                # This will force resample_from_to to produce the expected shape
+                expected_affine = atlas_nib.affine.copy()
+                atlas_ref_img = nib.Nifti1Image(np.zeros(expected_output_shape, dtype=np.float32), expected_affine)
+                
+                resampled_img = resample_from_to(func_first_vol_img, atlas_ref_img, order=1)
+                fnc_rawdata_t = resampled_img.get_fdata()
+                print('fnc_rawdata_t shape (resampled to expected grid):', fnc_rawdata_t.shape)
                 print('atlas (target) shape:', atlas_data_las.shape)
-                # Now, crop indices as in MATLAB
-                # Helper to get crop indices
-                def get_crop_indices(data_dim, atlas_dim):
-                    if data_dim > atlas_dim:
-                        xshift = (data_dim - atlas_dim) // 2
-                        axs = 0
-                        axe = atlas_dim
-                        dxs = xshift
-                        dxe = xshift + atlas_dim
-                    else:
-                        xshift = (atlas_dim - data_dim) // 2
-                        axs = xshift
-                        axe = xshift + data_dim
-                        dxs = 0
-                        dxe = data_dim
-                    return axs, axe, dxs, dxe, xshift
-                fnc_rawdata_tt_s = fnc_rawdata_t.shape  # shape of resampled data
-                print('DEBUG: fnc_rawdata_tt_s (resampled data shape):', fnc_rawdata_tt_s)
-                atlas_shape = atlas_data_las.shape      # shape of atlas
-                axs, axe, dxs, dxe, xshift_x = get_crop_indices(fnc_rawdata_tt_s[0], atlas_shape[0])
-                ays, aye, dys, dye, xshift_y = get_crop_indices(fnc_rawdata_tt_s[1], atlas_shape[1])
-                azs, aze, dzs, dze, xshift_z = get_crop_indices(fnc_rawdata_tt_s[2], atlas_shape[2])
-                print('Before shift/trim:')
-                print(fnc_rawdata_tt_s)
-                print(atlas_shape)
-                if fnc_rawdata_tt_s[0] > atlas_shape[0]:
-                    print(f'X shift (data > atlas): xshift = {xshift_x}')
-                else:
-                    print(f'X shift (atlas > data): xshift = {xshift_x}')
-                if fnc_rawdata_tt_s[1] > atlas_shape[1]:
-                    print(f'Y shift (data > atlas): xshift = {xshift_y}')
-                else:
-                    print(f'Y shift (atlas > data): xshift = {xshift_y}')
-                if fnc_rawdata_tt_s[2] > atlas_shape[2]:
-                    print(f'Z shift (data > atlas): xshift = {xshift_z}')
-                else:
-                    print(f'Z shift (atlas > data): xshift = {xshift_z}')
-                print('--- Cropping/shift indices summary (Python) ---')
-                print(f'axs: {axs+1} to {axe}')
-                print(f'ays: {ays+1} to {aye}')
-                print(f'azs: {azs+1} to {aze}')
-                print(f'dxs: {dxs+1} to {dxe}')
-                print(f'dys: {dys+1} to {dye}')
-                print(f'dzs: {dzs+1} to {dze}')
-                # Crop or pad the resampled data to match the atlas shape (MATLAB-style)
-                cropped_func = np.zeros(atlas_data_las.shape + (func_data_las.shape[3],), dtype=func_data_las.dtype)
+                print('Expected vs actual shape match:', expected_output_shape == fnc_rawdata_t.shape)
+                
+                # Debug output to match MATLAB format
+                print("Atlas array shape:")
+                print(f"   {atlas_data_las.shape[0]}   {atlas_data_las.shape[1]}   {atlas_data_las.shape[2]}")
+                print()
+                print("fnc_rawdata_t:")
+                print("fnc_rawdata_tt:")
+                print("Before shift/trim:")
+                print(f"   {fnc_rawdata_t.shape[0]}   {fnc_rawdata_t.shape[1]}   {fnc_rawdata_t.shape[2]}")
+                print()
+                print(f"   {atlas_data_las.shape[0]}   {atlas_data_las.shape[1]}   {atlas_data_las.shape[2]}")
+                print()
+                
+                # Calculate shift indices like MATLAB for comparison
+                def get_matlab_style_indices(data_shape, atlas_shape):
+                    results = {}
+                    for dim, (data_dim, atlas_dim) in enumerate(zip(data_shape, atlas_shape)):
+                        dim_name = ['X', 'Y', 'Z'][dim]
+                        if data_dim > atlas_dim:
+                            xshift = (data_dim - atlas_dim) // 2
+                            # MATLAB uses 1-based indexing
+                            axs = 1
+                            axe = atlas_dim
+                            dxs = xshift + 1  # +1 for MATLAB 1-based indexing
+                            dxe = xshift + atlas_dim
+                            print(f"{dim_name} shift (data > atlas): xshift = {xshift}")
+                            results[f'ax{dim_name.lower()}s'] = axs
+                            results[f'ax{dim_name.lower()}e'] = axe
+                            results[f'dx{dim_name.lower()}s'] = dxs
+                            results[f'dx{dim_name.lower()}e'] = dxe
+                        else:
+                            xshift = (atlas_dim - data_dim) // 2
+                            axs = xshift + 1  # +1 for MATLAB 1-based indexing
+                            axe = xshift + data_dim
+                            dxs = 1
+                            dxe = data_dim
+                            print(f"{dim_name} shift (atlas > data): xshift = {xshift}")
+                            results[f'ax{dim_name.lower()}s'] = axs
+                            results[f'ax{dim_name.lower()}e'] = axe
+                            results[f'dx{dim_name.lower()}s'] = dxs
+                            results[f'dx{dim_name.lower()}e'] = dxe
+                    return results
+                
+                indices = get_matlab_style_indices(fnc_rawdata_t.shape, atlas_data_las.shape)
+                print("--- Cropping/shift indices summary (Python equivalent) ---")
+                print(f"axs: {indices.get('axxs', 'N/A')} to {indices.get('axxs', 0) + atlas_data_las.shape[0] - 1 if 'axxs' in indices else 'N/A'}")
+                print(f"ays: {indices.get('axys', 'N/A')} to {indices.get('axys', 0) + atlas_data_las.shape[1] - 1 if 'axys' in indices else 'N/A'}")
+                print(f"azs: {indices.get('axzs', 'N/A')} to {indices.get('axzs', 0) + atlas_data_las.shape[2] - 1 if 'axzs' in indices else 'N/A'}")
+                print(f"dxs: {indices.get('dxxs', 'N/A')} to {indices.get('dxxe', 'N/A')}")
+                print(f"dys: {indices.get('dxys', 'N/A')} to {indices.get('dxye', 'N/A')}")
+                print(f"dzs: {indices.get('dxzs', 'N/A')} to {indices.get('dxze', 'N/A')}")
+                
+                # Use resample_from_to for all timepoints to match MATLAB's imwarp OutputView behavior
+                resampled_func = np.zeros(expected_output_shape + (func_data_las.shape[3],), dtype=func_data_las.dtype)
                 for t in range(func_data_las.shape[3]):
-                    fnc_rawdata_t = affine_transform(
-                        func_data_las[..., t],
-                        matrix=affine_transform_mat[:3, :3],
-                        offset=affine_transform_mat[:3, 3],
-                        order=1
-                    )
-                    # Crop or pad as needed
-                    # If resampled data is larger, crop
-                    if fnc_rawdata_t.shape[0] > atlas_shape[0]:
-                        x_slice = slice(dxs, dxe)
-                    else:
-                        x_slice = slice(0, fnc_rawdata_t.shape[0])
-                    if fnc_rawdata_t.shape[1] > atlas_shape[1]:
-                        y_slice = slice(dys, dye)
-                    else:
-                        y_slice = slice(0, fnc_rawdata_t.shape[1])
-                    if fnc_rawdata_t.shape[2] > atlas_shape[2]:
-                        z_slice = slice(dzs, dze)
-                    else:
-                        z_slice = slice(0, fnc_rawdata_t.shape[2])
-                    cropped = fnc_rawdata_t[x_slice, y_slice, z_slice]
-                    # If cropped is smaller than atlas, pad
-                    pad_x = atlas_shape[0] - cropped.shape[0]
-                    pad_y = atlas_shape[1] - cropped.shape[1]
-                    pad_z = atlas_shape[2] - cropped.shape[2]
-                    px0 = pad_x // 2 if pad_x > 0 else 0
-                    py0 = pad_y // 2 if pad_y > 0 else 0
-                    pz0 = pad_z // 2 if pad_z > 0 else 0
-                    px1 = pad_x - px0 if pad_x > 0 else 0
-                    py1 = pad_y - py0 if pad_y > 0 else 0
-                    pz1 = pad_z - pz0 if pad_z > 0 else 0
-                    padded = np.pad(cropped, ((px0, px1), (py0, py1), (pz0, pz1)), mode='constant')
-                    cropped_func[..., t] = padded[:atlas_shape[0], :atlas_shape[1], :atlas_shape[2]]
-                func_data = cropped_func
-                print('Cropped func_data shape:', func_data.shape)
-                # ...existing code...
-                # Use ROI order from .txt file (MATLAB style)
-                n_x, n_y, n_z, n_t = func_data.shape
-                flat_func = func_data.reshape(-1, n_t)  # (n_voxels, n_timepoints)
-                flat_atlas = fnc_pro_atlas_masks.flatten()  # (n_voxels,)
-                roi_labels = np.arange(1, len(self.settings['atlas_list']) + 1)  # 1-based labels
-                atlased_data = np.zeros((n_t, len(roi_labels)), dtype=np.float32)
-                for idx, label in enumerate(roi_labels):
-                    mask = (flat_atlas == label)
-                    if np.any(mask):
-                        ts = flat_func[mask, :]
-                        atlased_data[:, idx] = ts.mean(axis=0)
-                    else:
-                        atlased_data[:, idx] = 0
+                    func_vol_img = nib.Nifti1Image(func_data_las[..., t], func_img.affine)
+                    resampled_img = resample_from_to(func_vol_img, atlas_ref_img, order=1)
+                    resampled_func[..., t] = resampled_img.get_fdata()
+                print('Resampled func_data shape:', resampled_func.shape)
+                # Also resample the atlas to the same grid
+                atlas_img_nib = nib.Nifti1Image(atlas_data_las, atlas_nib.affine)
+                resampled_atlas_img = resample_from_to(atlas_img_nib, atlas_ref_img, order=0)  # nearest neighbor for labels
+                resampled_atlas = resampled_atlas_img.get_fdata().astype(np.int32)
+                print('Resampled atlas shape:', resampled_atlas.shape)
+                
+                # --- Apply MATLAB-style cropping to match atlas target shape ---
+                # Crop/pad the resampled data to match the atlas target shape
+                target_shape = atlas_data_las.shape  # This is the final target shape we want
+                print(f'Target atlas shape: {target_shape}')
+                print(f'Resampled data shape before cropping: {resampled_func.shape[:3]}')
+                
+                # Initialize output arrays with exact target shape
+                final_func = np.zeros(target_shape + (func_data_las.shape[3],), dtype=resampled_func.dtype)
+                final_atlas = np.zeros(target_shape, dtype=resampled_atlas.dtype)
+                
+                # Calculate how much to copy from each dimension (minimum of target and resampled sizes)
+                copy_x = min(target_shape[0], resampled_func.shape[0])
+                copy_y = min(target_shape[1], resampled_func.shape[1])
+                copy_z = min(target_shape[2], resampled_func.shape[2])
+                
+                # Calculate offsets for center cropping/padding
+                # If resampled is larger, crop from center
+                # If resampled is smaller, pad to center
+                
+                # Source offsets (where to start copying from resampled data)
+                src_x_offset = max(0, (resampled_func.shape[0] - target_shape[0]) // 2)
+                src_y_offset = max(0, (resampled_func.shape[1] - target_shape[1]) // 2)
+                src_z_offset = max(0, (resampled_func.shape[2] - target_shape[2]) // 2)
+                
+                # Destination offsets (where to start placing in final arrays)
+                dst_x_offset = max(0, (target_shape[0] - resampled_func.shape[0]) // 2)
+                dst_y_offset = max(0, (target_shape[1] - resampled_func.shape[1]) // 2)
+                dst_z_offset = max(0, (target_shape[2] - resampled_func.shape[2]) // 2)
+                
+                print(f'Copy sizes: X={copy_x}, Y={copy_y}, Z={copy_z}')
+                print(f'Source offsets: X={src_x_offset}, Y={src_y_offset}, Z={src_z_offset}')
+                print(f'Destination offsets: X={dst_x_offset}, Y={dst_y_offset}, Z={dst_z_offset}')
+                
+                # Copy the data
+                final_func[dst_x_offset:dst_x_offset+copy_x, 
+                          dst_y_offset:dst_y_offset+copy_y, 
+                          dst_z_offset:dst_z_offset+copy_z, :] = \
+                    resampled_func[src_x_offset:src_x_offset+copy_x,
+                                  src_y_offset:src_y_offset+copy_y,
+                                  src_z_offset:src_z_offset+copy_z, :]
+                
+                final_atlas[dst_x_offset:dst_x_offset+copy_x,
+                           dst_y_offset:dst_y_offset+copy_y,
+                           dst_z_offset:dst_z_offset+copy_z] = \
+                    resampled_atlas[src_x_offset:src_x_offset+copy_x,
+                                   src_y_offset:src_y_offset+copy_y,
+                                   src_z_offset:src_z_offset+copy_z]
+                
+                print(f'Final func shape: {final_func.shape}')
+                print(f'Final atlas shape: {final_atlas.shape}')
+                print(f'Target atlas shape match: {final_atlas.shape == target_shape}')
+                
+                func_data = final_func
+                resampled_atlas = final_atlas
+                
+                # Calculate atlased data (MATLAB equivalent)
+                print(f'{i+1}/{fnc_pro_filelength}: Applying Atlas')
+                
+                # Use the resampled atlas and functional data which are already perfectly aligned
+                fnc_rawdata_len = func_data.shape[3]
+                
+                atlased_data = np.zeros((fnc_rawdata_len, atl_len), dtype=np.float64)  # Match MATLAB double
+                fnc_pro_atlas_masks_flat = resampled_atlas.flatten(order='F')  # Use Fortran-style to match MATLAB
+                fnc_data_flat = func_data.reshape(resampled_atlas.shape[0] * resampled_atlas.shape[1] * resampled_atlas.shape[2], fnc_rawdata_len, order='F')  # Use Fortran-style
+                
+                print(f'fnc_pro_atlas_masks_flat shape: {fnc_pro_atlas_masks_flat.shape}')
+                print(f'fnc_data_flat shape: {fnc_data_flat.shape}')
+                
+                for ii in range(1, atl_len + 1):  
+                    temp_pos = (fnc_pro_atlas_masks_flat == ii)
+                    temp_value = fnc_data_flat[temp_pos, :]
+                    
+                    # Debug output to match MATLAB format
+                    voxel_count = np.sum(temp_pos)
+                    print(f'ROI {ii}: {voxel_count} voxels')
+                    
+                    if voxel_count > 0:
+                        # Print first few voxel values and statistics for comparison
+                        if temp_value.shape[0] > 0:
+                            first_timepoint_values = temp_value[:, 0]  # First timepoint
+                            roi_mean = np.nanmean(temp_value, axis=0)[0]  # Mean for first timepoint
+                            roi_std = np.nanstd(temp_value, axis=0)[0]   # Std for first timepoint
+                            print(f'  First few voxels (t=1): {first_timepoint_values[:min(5, len(first_timepoint_values))]}')
+                            print(f'  Mean: {roi_mean:.6f}, Std: {roi_std:.6f}')
+                    
+                    atlased_data[:, ii-1] = np.nanmean(temp_value, axis=0)
             else:
                 # .mat input: load full matrix (time × regions)
                 mat = loadmat(file_path)
