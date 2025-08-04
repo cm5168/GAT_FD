@@ -603,9 +603,11 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                             fnc_data(axs:axe,ays:aye,azs:aze,ii)=fnc_rawdata_tt(dxs:dxe,dys:dye,dzs:dze);
                         end
                         disp('Resampled func_data shape:');
-                        disp(size(fnc_data));
+                        fprintf('   %d   %d   %d   %d\n', size(fnc_data,1), size(fnc_data,2), size(fnc_data,3), size(fnc_data,4));
+                        disp(' ');
                         disp('Final func_data shape:');
-                        disp(size(fnc_data));
+                        fprintf('   %d   %d   %d   %d\n', size(fnc_data,1), size(fnc_data,2), size(fnc_data,3), size(fnc_data,4));
+                        disp(' ');
                     end
 
                     % Calculate atlased data
@@ -615,7 +617,14 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                     
                     % Use the atlas which is already in the target space
                     disp('Resampled atlas shape:');
-                    disp(size(fnc_pro_atlas_masks));
+                    fprintf('   %d   %d   %d\n', size(fnc_pro_atlas_masks,1), size(fnc_pro_atlas_masks,2), size(fnc_pro_atlas_masks,3));
+                    disp(' ');
+                    
+                    % Print target atlas shape and data shape before cropping
+                    disp(['Target atlas shape: (', num2str(size(fnc_pro_atlas_masks,1)), ', ', num2str(size(fnc_pro_atlas_masks,2)), ', ', num2str(size(fnc_pro_atlas_masks,3)), ')']);
+                    disp(['Cropped func shape: (', num2str(size(fnc_data,1)), ', ', num2str(size(fnc_data,2)), ', ', num2str(size(fnc_data,3)), ', ', num2str(size(fnc_data,4)), ')']);
+                    disp(['Cropped atlas shape: (', num2str(size(fnc_pro_atlas_masks,1)), ', ', num2str(size(fnc_pro_atlas_masks,2)), ', ', num2str(size(fnc_pro_atlas_masks,3)), ')']);
+                    disp(['Target atlas shape match: ', num2str(isequal(size(fnc_pro_atlas_masks), size(fnc_data(:,:,:,1))))]);
                     
                     atlased_data=zeros(fnc_rawdata_len,atl_len,"double");
                     fnc_pro_atlas_masks_flat=fnc_pro_atlas_masks(:);
@@ -632,16 +641,22 @@ classdef gatfd_ui_process < matlab.apps.AppBase
                         process_d.Message = {[num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas ',num2str(ii),'/',num2str(atl_len)]};
                         disp([num2str(i),'/',num2str(fnc_pro_filelength),': Applying Atlas ',num2str(ii),'/',num2str(atl_len)]);
                         temp_pos=fnc_pro_atlas_masks_flat==ii;
-                        disp(['ROI ', num2str(ii), ': ', num2str(sum(temp_pos)), ' voxels']);
+                        
+                        % Debug output to match Python format
+                        voxel_count = sum(temp_pos);
+                        disp(['ROI ', num2str(ii), ': ', num2str(voxel_count), ' voxels']);
+                        
                         temp_value=fnc_data_flat(temp_pos,:);
                         
-                        % Debug: Print first few values and their statistics
-                        if ii <= 3  % Only for first 3 ROIs to avoid too much output
-                            disp(['ROI ', num2str(ii), ' temp_value shape: ', num2str(size(temp_value,1)), ' x ', num2str(size(temp_value,2))]);
+                        if voxel_count > 0
+                            % Print first few voxel values and statistics for comparison
                             if size(temp_value,1) > 0
-                                disp(['ROI ', num2str(ii), ' first 5 voxels, first timepoint: ', num2str(temp_value(1:min(5,size(temp_value,1)),1)')]);
-                                disp(['ROI ', num2str(ii), ' mean first timepoint: ', num2str(mean(temp_value(:,1),'omitnan'))]);
-                                disp(['ROI ', num2str(ii), ' std first timepoint: ', num2str(std(temp_value(:,1),'omitnan'))]);
+                                first_timepoint_values = temp_value(:,1);  % First timepoint
+                                roi_mean = mean(temp_value(:,1), 'omitnan');  % Mean for first timepoint
+                                roi_std = std(temp_value(:,1), 'omitnan');   % Std for first timepoint
+                                first_few = first_timepoint_values(1:min(5, length(first_timepoint_values)));
+                                disp(['  First few voxels (t=1): [', num2str(first_few', '%.6f '), ']']);
+                                disp(['  Mean: ', sprintf('%.6f', roi_mean), ', Std: ', sprintf('%.6f', roi_std)]);
                             end
                         end
                         
